@@ -257,6 +257,13 @@
     rand(min, max) {
       return min + Math.random() * (max - min);
     },
+    makeRng(seed) {
+      let s = (seed || 1) >>> 0;
+      return function () {
+        s = (s * 1664525 + 1013904223) >>> 0;
+        return s / 4294967296;
+      };
+    },
     dist(x1, y1, x2, y2) {
       return Math.hypot(x2 - x1, y2 - y1);
     },

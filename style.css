@@ -178,6 +178,7 @@ html, body {
 
 .bind-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
 }
@@ -327,6 +328,13 @@ html, body {
   padding: 3px 6px;
 }
 
+.hp-tag {
+  font-size: 9px;
+  font-weight: bold;
+  color: #c89e45;
+  letter-spacing: 0.6px;
+}
+
 .hp-bar-wrap {
   flex: 1;
   height: 6px;
@@ -465,15 +473,15 @@ html, body {
 
 .status-line {
   font-size: 10px;
-  color: #c8b698;
-  letter-spacing: 0.4px;
+  color: #deb592;
+  letter-spacing: 0.5px;
 }
 
 .controls-legend {
-  font-size: 9px;
-  color: #827460;
-  line-height: 1.25;
-  border-top: 1px solid #2e241b;
+  font-size: 9.5px;
+  color: #b8ab93;
+  line-height: 1.3;
+  border-top: 1px solid #3d2f23;
   padding-top: 4px;
 }
 

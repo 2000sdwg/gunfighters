@@ -1146,6 +1146,14 @@
     g.fill();
   }
 
+  function makeRng(seed) {
+    let s = (seed || 1) >>> 0;
+    return function () {
+      s = (s * 1664525 + 1013904223) >>> 0;
+      return s / 4294967296;
+    };
+  }
+
   let cloudCaches = null;
   function initCloudCaches() {
     if (cloudCaches) return cloudCaches;
@@ -2912,7 +2920,7 @@
       } else {
         ui.hpBarFill.style.background = '#c9241c';
       }
-      if (ui.hpNum) ui.hpNum.textContent = `${Math.round(curHp)} HP`;
+      if (ui.hpNum) ui.hpNum.textContent = `${Math.round(curHp)} / ${maxHp}`;
     }
 
     if (ui.zoneName) ui.zoneName.textContent = state.zoneLabel || 'САЛУН';
@@ -3128,6 +3136,7 @@
     state.input.mouseY = viewH * 0.5;
     bindEvents();
     refreshKeybindLabels();
+    updateHUD();
     requestAnimationFrame(loop);
   }
 
