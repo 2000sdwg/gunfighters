@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ПОЛУДЕННЫЙ УЖАС</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- Верхний правый угол: компактная кнопка настроек -->
+  <div id="hud-top-right">
+    <button id="btn-settings" class="btn-toggle" title="Физика, звук и управление">⚙</button>
+    <div id="settings-panel" class="panel hidden">
+      <div class="section-title">ФИЗИКА И ЗВУК</div>
+      <label class="slider-row">
+        <span>Инерция ствола</span>
+        <input type="range" id="sl-inertia" min="0.4" max="2.0" step="0.05" value="1.0" />
+        <b id="val-inertia">1.00</b>
+      </label>
+      <label class="slider-row">
+        <span>Отдача</span>
+        <input type="range" id="sl-recoil" min="0.4" max="2.0" step="0.05" value="1.0" />
+        <b id="val-recoil">1.00</b>
+      </label>
+      <label class="slider-row">
+        <span>Упругость (перелёт)</span>
+        <input type="range" id="sl-spring" min="0.5" max="1.8" step="0.05" value="1.0" />
+        <b id="val-spring">1.00</b>
+      </label>
+      <label class="slider-row">
+        <span>Громкость эха</span>
+        <input type="range" id="sl-echo" min="0" max="2.0" step="0.05" value="1.0" />
+        <b id="val-echo">1.00</b>
+      </label>
+
+      <div class="section-title">УПРАВЛЕНИЕ (КЛИК ДЛЯ ЗАМЕНЫ)</div>
+      <div class="bind-row">
+        <span>Взвод / Скоба</span>
+        <button class="btn-bind" data-action="cock" id="bind-cock">Shift</button>
+      </div>
+      <div class="bind-row">
+        <span>Укрытие</span>
+        <button class="btn-bind" data-action="cover" id="bind-cover">Пробел</button>
+      </div>
+      <div class="bind-row">
+        <span>Перекат</span>
+        <button class="btn-bind" data-action="roll" id="bind-roll">Пробел</button>
+      </div>
+      <div class="bind-actions">
+        <button id="btn-reset-binds" class="btn-small">Сброс</button>
+        <button id="btn-toggle-rays" class="btn-small">Лучи (V): ВЫКЛ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Короткое центральное уведомление -->
+  <div id="center-toast" class="toast hidden"></div>
+
+  <!-- Компактный иммерсивный виджет перезарядки в нижнем центре (не перекрывает поле боя) -->
+  <div id="reload-panel" class="panel hidden">
+    <div class="reload-header">
+      <span id="reload-title">ПЕРЕЗАРЯДКА</span>
+      <span class="reload-hint">Клик по каморе / [R] — патрон • [ПКМ / Esc] — закрыть</span>
+    </div>
+    <canvas id="reload-canvas" width="136" height="84"></canvas>
+    <div id="reload-slots" class="reload-slots hidden"></div>
+    <button id="btn-insert-one" class="btn-insert">+ ВСТАВИТЬ ПАТРОН [R]</button>
+  </div>
+
+  <!-- Единый компактный боевой блок в левом нижнем углу -->
+  <div id="hud-bottom-left" class="panel">
+    <div class="hud-meta-row">
+      <span class="badge" id="zone-name">САЛУН</span>
+      <span class="echo-tag" id="echo-info">ЗАКРЫТОЕ ПОМЕЩЕНИЕ</span>
+    </div>
+
+    <div class="weapons-bar" id="weapons-bar">
+      <div class="w-slot active" data-idx="0" title="Colt Walker (SA)">
+        <span class="w-key">1</span>
+        <span class="w-name">Walker</span>
+      </div>
+      <div class="w-slot" data-idx="1" title="Colt 1877 Lightning (DA)">
+        <span class="w-key">2</span>
+        <span class="w-name">Lightning</span>
+      </div>
+      <div class="w-slot" data-idx="2" title="Winchester 1873">
+        <span class="w-key">3</span>
+        <span class="w-name">Winchester</span>
+      </div>
+    </div>
+
+    <div class="ammo-box">
+      <div class="ammo-dots" id="ammo-dots"></div>
+      <div class="ammo-meta">
+        <span id="ammo-count">6/6</span>
+        <span id="mech-state" class="mech-ready">ВЗВЕДЁН</span>
+      </div>
+    </div>
+
+    <div class="hud-foot-row">
+      <span id="status-line" class="status-line">ГОТОВ К БОЮ</span>
+    </div>
+    <div class="controls-legend" id="controls-legend">
+      WASD • ЛКМ огонь • ПКМ фокус • Shift взвод • R зарядка
+    </div>
+  </div>
+
+  <!-- Подключение модулей строго по порядку -->
+  <script defer src="js/config.js"></script>
+  <script defer src="js/audio.js"></script>
+  <script defer src="js/world.js"></script>
+  <script defer src="js/sim.js"></script>
+  <script defer src="js/render.js"></script>
+</body>
+</html>
