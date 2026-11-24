@@ -884,6 +884,107 @@
     };
   }
 
+  function updateBanditCombat(state, world, dt) {
+    if (G.CFG.spawnBandits === false) return;
+    const p = state.player;
+    if (p.dead || (p.hp !== undefined && p.hp <= 0)) return;
+
+    for (let i = 0; i < world.targets.length; i++) {
+      const t = world.targets[i];
+      if (t.kind !== 'bandit' || !t.alive) continue;
+
+      if (t.shootCooldown > 0) {
+        t.shootCooldown = Math.max(0, t.shootCooldown - dt);
+      }
+
+      const dx = p.x - t.x;
+      const dy = p.y - t.y;
+      const dist = Math.hypot(dx, dy);
+
+      // Проверка дистанции видимости
+      const maxDist = t.sightDist || 440;
+      if (dist > maxDist || dist < 12) {
+        t.aimTimer = Math.max(0, (t.aimTimer || 0) - dt * 2.0);
+        t.aimState = 'patrol';
+        t.telegraphFrac = 0;
+        continue;
+      }
+
+      // Проверка прямой видимости (LOS) против высоких стен и зданий
+      const ndx = dx / dist;
+      const ndy = dy / dist;
+      let hasLos = true;
+      for (let sIdx = 0; sIdx < world.wallSegments.length; sIdx++) {
+        const seg = world.wallSegments[sIdx];
+        if (!seg.high) continue;
+        const h = G.MATH.raySegment(t.x, t.y, ndx, ndy, dist - 6, seg.x1, seg.y1, seg.x2, seg.y2);
+        if (h) {
+          hasLos = false;
+          break;
+        }
+      }
+
+      if (hasLos) {
+        t.aimState = 'aim';
+        const wantAngle = Math.atan2(dy, dx);
+        t.angle = G.MATH.normAngle(t.angle + G.MATH.angleDiff(t.angle, wantAngle) * Math.min(1, dt * 6.0));
+        t.aimTimer = (t.aimTimer || 0) + dt;
+        const telegTime = t.telegraphTime || 0.55;
+        t.telegraphFrac = G.MATH.clamp(t.aimTimer / telegTime, 0, 1);
+
+        if (t.aimTimer >= telegTime && t.shootCooldown <= 0) {
+          t.aimTimer = 0;
+          t.telegraphFrac = 0;
+          const isRifle = t.gunType === 'rifle';
+          t.shootCooldown = isRifle ? 1.6 : 1.2;
+
+          G.AUDIO.playShot(isRifle ? 'winchester' : 'walker', false);
+
+          const bAngle = t.angle + G.MATH.rand(-0.05, 0.05);
+          const bdx = Math.cos(bAngle);
+          const bdy = Math.sin(bAngle);
+          const muzzleX = t.x + bdx * 14;
+          const muzzleY = t.y + bdy * 14;
+
+          state.bullets.push({
+            owner: 'bandit',
+            x: muzzleX,
+            y: muzzleY,
+            px: muzzleX,
+            py: muzzleY,
+            dx: bdx,
+            dy: bdy,
+            speed: isRifle ? 860 : 700,
+            damage: isRifle ? 26 : 18,
+            traveled: 0,
+            falloffStart: 200,
+            falloffEnd: 450,
+            falloffMinMult: 0.7,
+            life: 1.2
+          });
+
+          spawnParticles(state, muzzleX, muzzleY, 6, {
+            baseAngle: bAngle,
+            spread: 0.45,
+            minSpeed: 45,
+            maxSpeed: 140,
+            minLife: 0.08,
+            maxLife: 0.22,
+            minSize: 1.5,
+            maxSize: 3.2,
+            colors: ['#fff4c7', '#e3c068', '#f58a38'],
+            kind: 'spark'
+          });
+          spawnShell(state, t.x, t.y, t.angle - Math.PI * 0.45, 0.85);
+        }
+      } else {
+        t.aimTimer = Math.max(0, (t.aimTimer || 0) - dt * 2.0);
+        t.aimState = 'patrol';
+        t.telegraphFrac = 0;
+      }
+    }
+  }
+
   function updateBullets(state, world, dt) {
     const P = getPal();
 
@@ -912,28 +1013,71 @@
         }
       }
 
-      let hitTarget = null;
-      for (let tIdx = 0; tIdx < world.targets.length; tIdx++) {
-        const t = world.targets[tIdx];
-        if (!t.alive) continue;
-        const ox = t.x - b.x;
-        const oy = t.y - b.y;
+      if (b.owner === 'bandit') {
+        const p = state.player;
+        const ox = p.x - b.x;
+        const oy = p.y - b.y;
         const proj = ox * b.dx + oy * b.dy;
-        if (proj < 0 || proj > bestDist) continue;
-        const perp2 = ox * ox + oy * oy - proj * proj;
-        const rad = t.r + 2;
-        if (perp2 <= rad * rad) {
-          bestDist = proj;
-          hitTarget = t;
-          hitWall = null;
+        if (proj >= 0 && proj <= bestDist) {
+          const perp2 = ox * ox + oy * oy - proj * proj;
+          const rad = G.CFG.playerRadius + 2;
+          if (perp2 <= rad * rad) {
+            bestDist = proj;
+            const protectedByCover = p.inCover && !p.peeking;
+            const rolling = p.rolling;
+            if (!rolling && !protectedByCover) {
+              const dmg = b.damage || 20;
+              p.hp = Math.max(0, (p.hp !== undefined ? p.hp : 100) - dmg);
+              p.hurtTimer = 0.35;
+              p.regenTimer = 0;
+              G.AUDIO.playImpact('flesh');
+              state.camera.shakeMag = Math.max(state.camera.shakeMag, 4.5);
+              spawnBloodBurst(state, p.x, p.y, b.dx, b.dy, dmg, p.hp <= 0);
+              spawnFloatText(state, p.x, p.y - 8, `-${dmg}`, '#c9241c', true);
+              state.bullets.splice(i, 1);
+              continue;
+            } else if (protectedByCover) {
+              G.AUDIO.playImpact('wood');
+              spawnParticles(state, b.x + b.dx * proj, b.y + b.dy * proj, 6, {
+                baseAngle: Math.atan2(-b.dy, -b.dx),
+                spread: 0.8,
+                minSpeed: 30,
+                maxSpeed: 80,
+                minLife: 0.15,
+                maxLife: 0.35,
+                minSize: 1.2,
+                maxSize: 2.2,
+                colors: [P.woodWarm[1], P.woodWarm[2]],
+                kind: 'debris'
+              });
+              state.bullets.splice(i, 1);
+              continue;
+            }
+          }
         }
-      }
+      } else {
+        let hitTarget = null;
+        for (let tIdx = 0; tIdx < world.targets.length; tIdx++) {
+          const t = world.targets[tIdx];
+          if (!t.alive) continue;
+          const ox = t.x - b.x;
+          const oy = t.y - b.y;
+          const proj = ox * b.dx + oy * b.dy;
+          if (proj < 0 || proj > bestDist) continue;
+          const perp2 = ox * ox + oy * oy - proj * proj;
+          const rad = t.r + 2;
+          if (perp2 <= rad * rad) {
+            bestDist = proj;
+            hitTarget = t;
+            hitWall = null;
+          }
+        }
 
-      if (hitTarget) {
-        const hx = b.x + b.dx * bestDist;
-        const hy = b.y + b.dy * bestDist;
-        hitTarget.hitFlash = 0.14;
-        hitTarget.wobble = 1.0;
+        if (hitTarget) {
+          const hx = b.x + b.dx * bestDist;
+          const hy = b.y + b.dy * bestDist;
+          hitTarget.hitFlash = 0.14;
+          hitTarget.wobble = 1.0;
 
         if (hitTarget.kind === 'bandit') {
           const hitCalc = calcBulletDamage(b, bestDist);
@@ -1027,6 +1171,7 @@
         state.bullets.splice(i, 1);
         continue;
       }
+    }
 
       if (hitWall) {
         const mat = hitWall.seg.mat || 'wood';
@@ -1363,6 +1508,28 @@
       if (p.flashTimer > 0) p.flashTimer = Math.max(0, p.flashTimer - dt);
       if (p.recoilKickAnim > 0) p.recoilKickAnim = Math.max(0, p.recoilKickAnim - dt * 6.5);
       if (p.rollCooldown > 0) p.rollCooldown = Math.max(0, p.rollCooldown - dt);
+      if (p.hurtTimer > 0) p.hurtTimer = Math.max(0, p.hurtTimer - dt);
+      p.regenTimer = (p.regenTimer || 0) + dt;
+      if (p.regenTimer > 4.5 && p.hp < (p.maxHp || 100) && p.hp > 0) {
+        p.hp = Math.min(p.maxHp || 100, p.hp + dt * 10);
+      }
+      if (p.hp <= 0 && !p.dead) {
+        p.dead = true;
+        p.respawnTimer = 2.5;
+        showToast(state, 'ВЫ ПОГИБЛИ...', 2.2);
+      }
+      if (p.dead) {
+        p.respawnTimer -= dt;
+        if (p.respawnTimer <= 0) {
+          p.dead = false;
+          p.hp = p.maxHp || 100;
+          p.x = 180;
+          p.y = 250;
+          p.vx = 0;
+          p.vy = 0;
+          showToast(state, 'ВОЗРОЖДЕНИЕ В САЛУНЕ', 1.8);
+        }
+      }
 
       // Плавное раскрытие барабана при перезарядке (0..1)
       ws.reloadOpenFrac = G.MATH.lerp(ws.reloadOpenFrac || 0, ws.reloading ? 1 : 0, Math.min(1, dt * 14));
@@ -1583,6 +1750,7 @@
 
       world.updateDoors(dt, p);
       world.updateTargets(dt, p);
+      updateBanditCombat(state, world, dt);
       updateBullets(state, world, dt);
       updateBloodDrops(state, world, dt);
       updateFlyingHats(state, world, dt);

@@ -673,8 +673,8 @@
 
   // 2.5D-здание в духе референсов: крыша из черепицы/дранки + видимый деревянный фасад с окнами и козырьком
   function bakeBuildingSprite(s, P) {
-    const padTop = 8;
-    const padBot = s.y < 200 ? 6 : 2;
+    const padTop = 10;
+    const padBot = s.y < 200 ? 8 : 4;
     const cw = s.w + 4;
     const ch = s.h + padTop + padBot;
     const c = document.createElement('canvas');
@@ -691,11 +691,11 @@
     const oy = padTop;
 
     // 1. Базовая коробка здания (контур)
-    ctx.fillStyle = '#1a1410';
+    ctx.fillStyle = '#140f0c';
     ctx.fillRect(ox, oy, s.w, s.h);
 
     // 2. Видимый 2.5D-фасад со стороны улицы (горизонтальные доски обшивки + окна с рамами + дверь)
-    const facadeH = isNorth ? 18 : 10;
+    const facadeH = isNorth ? 26 : 12;
     const facadeY = isNorth ? oy + s.h - facadeH : oy + 1;
 
     ctx.fillStyle = wallPal[2];
@@ -717,54 +717,68 @@
 
     // Окна и проёмы на северных фасадах (на них смотрит камера в 3/4-проекции!)
     if (isNorth) {
-      const winCount = Math.max(3, Math.floor((s.w - 30) / 42));
+      const winCount = Math.max(3, Math.floor((s.w - 30) / 44));
       const step = Math.floor((s.w - 24) / winCount);
       for (let i = 0; i < winCount; i++) {
-        const wx = ox + 16 + i * step;
-        const wy = facadeY + 4;
+        const wx = ox + 18 + i * step;
+        const wy = facadeY + 5;
         const isDoor = i === Math.floor(winCount / 2);
 
         if (isDoor) {
           // Входная дверь под козырьком
-          ctx.fillStyle = '#17110d';
-          ctx.fillRect(wx, wy - 1, 12, facadeH - 3);
+          ctx.fillStyle = '#140f0c';
+          ctx.fillRect(wx - 1, wy - 2, 14, facadeH - 4);
           ctx.fillStyle = wallPal[0];
           ctx.fillRect(wx - 1, wy - 2, 14, 1);
-          ctx.fillRect(wx - 1, wy - 1, 1, facadeH - 3);
-          ctx.fillRect(wx + 12, wy - 1, 1, facadeH - 3);
+          ctx.fillRect(wx - 1, wy - 1, 1, facadeH - 5);
+          ctx.fillRect(wx + 12, wy - 1, 1, facadeH - 5);
           ctx.fillStyle = '#36261a';
-          ctx.fillRect(wx + 2, wy + 1, 8, facadeH - 6);
-          ctx.fillStyle = '#c9a259';
-          ctx.fillRect(wx + 8, wy + 6, 1, 1);
+          ctx.fillRect(wx + 1, wy, 10, facadeH - 7);
+          // Латунная ручка
+          ctx.fillStyle = P.brass[1];
+          ctx.fillRect(wx + 8, wy + 8, 2, 2);
+          // Фрамуга над дверью
+          ctx.fillStyle = '#17262b';
+          ctx.fillRect(wx + 1, wy - 1, 10, 2);
         } else {
           // Многосекционное окно с белой/выгоревшей рамой и тёмным стеклом (референсы 1–3)
           ctx.fillStyle = P.woodPale[0];
-          ctx.fillRect(wx - 1, wy - 1, 12, 11);
-          ctx.fillStyle = '#181c20';
-          ctx.fillRect(wx, wy, 10, 9);
-          // Лёгкий холодный отблеск неба в стекле
-          ctx.fillStyle = '#3b5159';
-          ctx.fillRect(wx + 1, wy + 1, 3, 2);
-          ctx.fillRect(wx + 6, wy + 1, 2, 2);
+          ctx.fillRect(wx - 1, wy - 2, 12, 15);
+          ctx.fillStyle = '#141c22';
+          ctx.fillRect(wx, wy - 1, 10, 13);
+          // Холодный отблеск неба в верхних стеклах
+          ctx.fillStyle = P.glass[1];
+          ctx.fillRect(wx + 1, wy, 3, 4);
+          ctx.fillRect(wx + 6, wy, 3, 4);
           // Переплёт рамы и подоконник
           ctx.fillStyle = P.woodPale[1];
-          ctx.fillRect(wx + 4, wy, 2, 9);
-          ctx.fillRect(wx, wy + 4, 10, 1);
-          ctx.fillStyle = '#241b15';
-          ctx.fillRect(wx - 2, wy + 10, 14, 2);
+          ctx.fillRect(wx + 4, wy - 1, 2, 13);
+          ctx.fillRect(wx, wy + 5, 10, 1);
+          ctx.fillStyle = '#1b140f';
+          ctx.fillRect(wx - 2, wy + 12, 14, 2);
         }
       }
 
       // Навес крыльца/веранды, чуть выступающий вниз со столбами (как на референсе 1)
       const porchY = oy + s.h - 2;
-      ctx.fillStyle = '#1c1510';
-      ctx.fillRect(ox + 2, porchY, s.w - 4, 6);
+      ctx.fillStyle = '#140f0c';
+      ctx.fillRect(ox + 2, porchY, s.w - 4, 7);
       for (let x = ox + 3; x < ox + s.w - 3; x += 3) {
         ctx.fillStyle = rng() < 0.5 ? P.woodPale[2] : P.woodPale[3];
-        ctx.fillRect(x, porchY + 1, 2, 4);
+        ctx.fillRect(x, porchY + 1, 2, 5);
       }
       ctx.fillStyle = P.woodPale[0];
       ctx.fillRect(ox + 3, porchY + 1, s.w - 6, 1);
+
+      // Опорные столбы веранды
+      for (let postX = ox + 14; postX < ox + s.w - 12; postX += 38) {
+        ctx.fillStyle = '#140f0c';
+        ctx.fillRect(postX - 1, porchY + 4, 3, 4);
+        ctx.fillStyle = P.woodPale[2];
+        ctx.fillRect(postX, porchY + 4, 2, 3);
+        ctx.fillStyle = P.woodPale[0];
+        ctx.fillRect(postX, porchY + 4, 1, 3);
+      }
     }
 
     // 3. Детализированная крыша (серая дранка, выгоревшие пятна, конёк и свесы)
@@ -824,23 +838,23 @@
 
     // Деревянный парапет-вывеска (false-front) над северным фасадом (классика Дикого Запада, референс 1 и 2)
     if (isNorth) {
-      const py = ry + rh - 4;
+      const py = ry + rh - 6;
       ctx.fillStyle = wallPal[4];
-      ctx.fillRect(rx, py, rw, 4);
+      ctx.fillRect(rx, py, rw, 6);
       ctx.fillStyle = wallPal[1];
-      ctx.fillRect(rx + 1, py + 1, rw - 2, 2);
+      ctx.fillRect(rx + 1, py + 1, rw - 2, 4);
       ctx.fillStyle = wallPal[0];
       ctx.fillRect(rx + 2, py, rw - 4, 1);
       // Табличка по центру парапета
-      const signW = Math.min(72, Math.floor(rw * 0.4));
+      const signW = Math.min(84, Math.floor(rw * 0.42));
       const signX = rx + Math.floor((rw - signW) * 0.5);
-      ctx.fillStyle = '#241b15';
-      ctx.fillRect(signX, py - 1, signW, 5);
+      ctx.fillStyle = '#140f0c';
+      ctx.fillRect(signX, py - 2, signW, 7);
       ctx.fillStyle = '#b8a88a';
-      ctx.fillRect(signX + 1, py, signW - 2, 3);
+      ctx.fillRect(signX + 1, py - 1, signW - 2, 5);
       ctx.fillStyle = '#382a1e';
-      for (let lx = signX + 5; lx < signX + signW - 5; lx += 4) {
-        ctx.fillRect(lx, py + 1, 2, 1);
+      for (let lx = signX + 6; lx < signX + signW - 6; lx += 4) {
+        ctx.fillRect(lx, py + 1, 2, 2);
       }
     }
 
@@ -1194,7 +1208,13 @@
         knockVy: 0,
         deathAnim: 0,
         fallAngle: 0,
-        bloodPool: 0
+        bloodPool: 0,
+        aimTimer: 0,
+        shootCooldown: 0.8 + ((opts.patrolPhase || 0) * 0.4) % 0.8,
+        aimState: 'patrol',
+        sightDist: 440,
+        shootRange: 380,
+        telegraphTime: 0.55
       });
     }
 
@@ -1306,19 +1326,19 @@
 
         // --- УЗКАЯ УЛОЧКА (амбарно-бордовый, сланцево-бирюзовый и выгоревший серый дома с референсов) ---
         {
-          id: 'bld_n1', x: 340, y: 28, w: 224, h: 74, mat: 'wood', type: 'building', high: true, isCover: true,
+          id: 'bld_n1', x: 340, y: 10, w: 232, h: 92, mat: 'wood', type: 'building', high: true, isCover: true,
           roof: '#55524c', wallTrim: '#862a20', roofPalKey: 'shingle', wallPalKey: 'barnRed', roofStyle: 'shingle', chimney: true
         },
         {
-          id: 'bld_n2', x: 582, y: 36, w: 238, h: 66, mat: 'wood', type: 'building', high: true, isCover: true,
+          id: 'bld_n2', x: 580, y: 10, w: 242, h: 92, mat: 'wood', type: 'building', high: true, isCover: true,
           roof: '#4d7075', wallTrim: '#4d7075', roofPalKey: 'slateTeal', wallPalKey: 'slateTeal', roofStyle: 'planks', chimney: false
         },
         {
-          id: 'bld_s1', x: 340, y: 414, w: 214, h: 76, mat: 'wood', type: 'building', high: true, isCover: true,
+          id: 'bld_s1', x: 340, y: 414, w: 224, h: 86, mat: 'wood', type: 'building', high: true, isCover: true,
           roof: '#706c64', wallTrim: '#968770', roofPalKey: 'shingle', wallPalKey: 'woodPale', roofStyle: 'patchy', chimney: true
         },
         {
-          id: 'bld_s2', x: 574, y: 414, w: 248, h: 76, mat: 'wood', type: 'building', high: true, isCover: true,
+          id: 'bld_s2', x: 574, y: 414, w: 248, h: 86, mat: 'wood', type: 'building', high: true, isCover: true,
           roof: '#55524c', wallTrim: '#756652', roofPalKey: 'shingle', wallPalKey: 'woodPale', roofStyle: 'shingle', chimney: false
         },
 
@@ -1328,9 +1348,13 @@
         { id: 'wagon_1',  x: 540, y: 238, w: 62, h: 28, mat: 'wood',  type: 'wagon',        high: false, isCover: true },
         { id: 'crate_3',  x: 642, y: 320, w: 36, h: 32, mat: 'wood',  type: 'crate',        high: false, isCover: true },
         { id: 'crate_4',  x: 742, y: 176, w: 32, h: 38, mat: 'wood',  type: 'crate',        high: false, isCover: true },
+        { id: 'wagon_2',  x: 712, y: 254, w: 60, h: 28, mat: 'wood',  type: 'wagon',        high: false, isCover: true },
+        { id: 'crate_5',  x: 512, y: 312, w: 32, h: 30, mat: 'wood',  type: 'crate',        high: false, isCover: true },
+        { id: 'crate_6',  x: 540, y: 316, w: 24, h: 24, mat: 'wood',  type: 'crate',        high: false, isCover: true },
         { id: 'barrel_1', x: 366, y: 124, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
         { id: 'barrel_2', x: 560, y: 366, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
         { id: 'barrel_3', x: 786, y: 126, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
+        { id: 'barrel_4', x: 672, y: 164, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
 
         // --- УЩЕЛЬЕ КАНЬОНА ---
         { id: 'cliff_n1', x: 838,  y: 0,   w: 168, h: 96,  mat: 'rock', type: 'cliff', high: true, isCover: true },
@@ -1345,7 +1369,10 @@
         { id: 'rock_1', x: 948,  y: 214, w: 46, h: 42, mat: 'rock', type: 'boulder', high: false, isCover: true },
         { id: 'rock_2', x: 1084, y: 146, w: 44, h: 38, mat: 'rock', type: 'boulder', high: false, isCover: true },
         { id: 'rock_3', x: 1108, y: 326, w: 54, h: 44, mat: 'rock', type: 'boulder', high: false, isCover: true },
-        { id: 'rock_4', x: 1266, y: 230, w: 42, h: 46, mat: 'rock', type: 'boulder', high: false, isCover: true }
+        { id: 'rock_4', x: 1266, y: 230, w: 42, h: 46, mat: 'rock', type: 'boulder', high: false, isCover: true },
+        { id: 'rock_5', x: 1204, y: 218, w: 46, h: 42, mat: 'rock', type: 'boulder', high: false, isCover: true },
+        { id: 'rock_6', x: 1324, y: 172, w: 44, h: 40, mat: 'rock', type: 'boulder', high: false, isCover: true },
+        { id: 'crate_7', x: 1010, y: 308, w: 34, h: 32, mat: 'wood', type: 'crate',   high: false, isCover: true }
       ];
 
       // Телеграфные столбы с проводами вдоль улицы (референсы 1 и 2)
@@ -1358,7 +1385,7 @@
 
       // Оливковые деревья на окраине городка (референс 3)
       const trees = [
-        { x: 568, y: 60, r: 24 },
+        { x: 576, y: 36, r: 18 },
         { x: 564, y: 456, r: 22 },
         { x: 834, y: 406, r: 26 }
       ];

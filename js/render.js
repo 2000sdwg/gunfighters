@@ -26,6 +26,7 @@
     bindBtns: Array.from(document.querySelectorAll('.btn-bind')),
     btnResetBinds: document.getElementById('btn-reset-binds'),
     btnToggleRays: document.getElementById('btn-toggle-rays'),
+    btnToggleBandits: document.getElementById('btn-toggle-bandits'),
     toast: document.getElementById('center-toast'),
     reloadPanel: document.getElementById('reload-panel'),
     reloadTitle: document.getElementById('reload-title'),
@@ -36,7 +37,10 @@
     ammoDots: document.getElementById('ammo-dots'),
     ammoCount: document.getElementById('ammo-count'),
     mechState: document.getElementById('mech-state'),
-    controlsLegend: document.getElementById('controls-legend')
+    controlsLegend: document.getElementById('controls-legend'),
+    hpBox: document.getElementById('hp-box'),
+    hpBarFill: document.getElementById('hp-bar-fill'),
+    hpNum: document.getElementById('hp-num')
   };
 
   const rctx = ui.reloadCanvas ? ui.reloadCanvas.getContext('2d') : null;
@@ -598,15 +602,15 @@
         reloadAnim.inserts = [];
         reloadAnim.gatePress = 0;
       } else if (ev.type === 'insert_tube') {
-        // Подача патрона сверху точно в окно коробки Винчестера
+        // Подача патрона под углом 35-42 градуса сбоку-сверху в окно коробки Винчестера
         reloadAnim.inserts.push({
           kind: 'tube',
-          startX: 58,
-          startY: 6,
+          startX: 84,
+          startY: 10,
           endX: 58,
-          endY: 38,
+          endY: 40,
           t: 0,
-          dur: 0.19
+          dur: 0.20
         });
         reloadAnim.gatePress = 1.0;
         reloadAnim.joltY = 2.6;
@@ -685,12 +689,11 @@
       const cx = Math.round(CYL_CX + reloadAnim.joltX);
       const cy = Math.round(G.MATH.lerp(RELOAD_H + 18, CYL_CY, openFrac) + reloadAnim.joltY);
 
-      // 1. Крупный фрагмент рамки револьвера вокруг барабана
-      rctx.drawImage(frameImg, Math.round(reloadAnim.joltX), Math.round(reloadAnim.joltY));
-
-      // 2. Тень под барабаном и сам попиксельный барабан
-      rctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
-      rctx.fillRect(cx - 28, cy - 27, 58, 56);
+      // 1. Падающая тень под барабаном и сам откинутый барабан по центру
+      rctx.fillStyle = 'rgba(18, 12, 8, 0.38)';
+      rctx.beginPath();
+      rctx.ellipse(cx + 2, cy + 3, 30, 28, 0.25, 0, Math.PI * 2);
+      rctx.fill();
       rctx.drawImage(cylImg, cx - 32, cy - 32);
 
       const flyingSlots = {};
@@ -780,7 +783,7 @@
     rctx.fillStyle = P.brass[0];
     rctx.fillRect(43, baseY + 25 + leverDrop, 13, 1);
 
-    // Влетающий СВЕРХУ патрон (до передней стенки, уходит внутрь коробки)
+    // Влетающий под углом 35-42 градуса патрон (пуля входит первой и уходит за переднюю латунную стенку)
     for (let i = 0; i < reloadAnim.inserts.length; i++) {
       const ins = reloadAnim.inserts[i];
       if (ins.kind !== 'tube') continue;
@@ -788,9 +791,10 @@
       const ease = 1 - Math.pow(1 - p, 2);
       const ix = Math.round(G.MATH.lerp(ins.startX, ins.endX, ease));
       const iy = Math.round(G.MATH.lerp(ins.startY, ins.endY, ease));
+      const rot = G.MATH.lerp(-0.68, -0.15, ease);
       rctx.save();
       rctx.translate(ix, iy);
-      rctx.rotate(G.MATH.lerp(-0.14, 0.04, ease));
+      rctx.rotate(rot);
       rctx.drawImage(caches.topCartridge, -4, -10);
       rctx.restore();
     }
@@ -1075,6 +1079,13 @@
       });
     }
 
+    if (ui.btnToggleBandits) {
+      ui.btnToggleBandits.addEventListener('click', () => {
+        G.CFG.spawnBandits = !G.CFG.spawnBandits;
+        ui.btnToggleBandits.textContent = `Бандиты: ${G.CFG.spawnBandits ? 'ВКЛ' : 'ВЫКЛ'}`;
+      });
+    }
+
     ui.weaponSlots.forEach((slot) => {
       slot.addEventListener('click', () => {
         const idx = parseInt(slot.dataset.idx, 10);
@@ -1133,6 +1144,61 @@
     g.lineTo(x2, y2);
     g.closePath();
     g.fill();
+  }
+
+  let cloudCaches = null;
+  function initCloudCaches() {
+    if (cloudCaches) return cloudCaches;
+    function bakeOneCloud(w, h, seed) {
+      const { c, g } = makeOffscreen(w, h);
+      const rng = makeRng(seed);
+      // Холодная полупрозрачная органическая пиксельная тень облака (~0.15 альфа)
+      g.fillStyle = 'rgba(22, 28, 44, 0.15)';
+      const blobs = 10 + Math.floor(rng() * 5);
+      for (let i = 0; i < blobs; i++) {
+        const ew = Math.round(w * 0.28 + rng() * (w * 0.36));
+        const eh = Math.round(h * 0.32 + rng() * (h * 0.36));
+        const ex = Math.round(w * 0.18 + rng() * (w * 0.62));
+        const ey = Math.round(h * 0.22 + rng() * (h * 0.54));
+        g.beginPath();
+        g.ellipse(ex, ey, ew * 0.5, eh * 0.5, 0.12, 0, Math.PI * 2);
+        g.fill();
+      }
+      return c;
+    }
+    cloudCaches = [
+      bakeOneCloud(260, 140, 114),
+      bakeOneCloud(340, 180, 227),
+      bakeOneCloud(280, 150, 339)
+    ];
+    return cloudCaches;
+  }
+
+  function drawCloudShadows(g) {
+    const caches = initCloudCaches();
+    const period = world.width + 500;
+    // Бег облаков по ветру, синхронизированный с рябью бочек
+    const drift = state.time * 22;
+
+    const clouds = [
+      { img: caches[0], x: ((drift * 1.0 + 90) % period) - 250,   y: 60 + Math.sin(state.time * 0.05) * 16 },
+      { img: caches[1], x: ((drift * 1.15 + 580) % period) - 300,  y: 195 + Math.cos(state.time * 0.04) * 22 },
+      { img: caches[2], x: ((drift * 0.9 + 1140) % period) - 260, y: 325 + Math.sin(state.time * 0.06) * 18 }
+    ];
+
+    g.save();
+    // Строго исключаем интерьер салуна [0..336, 70..450] через аппаратный clip
+    g.beginPath();
+    g.rect(0, 0, world.width, 70);
+    g.rect(0, 450, world.width, Math.max(10, world.height - 450));
+    g.rect(336, 70, Math.max(10, world.width - 336), 380);
+    g.clip();
+
+    for (let i = 0; i < clouds.length; i++) {
+      const cl = clouds[i];
+      g.drawImage(cl.img, Math.round(cl.x), Math.round(cl.y));
+    }
+    g.restore();
   }
 
   function drawSaloonDaylight(g) {
@@ -1945,6 +2011,21 @@
     // Овальная шляпа бандита
     drawDetailedHat(g, -1, 0, t.hatColor, t.coatTrim, t.hatBand, t.tough ? P.leather[1] : P.leather[0]);
 
+    // Телеграф прицеливания (блеск ствола при наведении на игрока)
+    if (t.telegraphFrac > 0) {
+      const isRifle = t.gunType === 'rifle';
+      const gx = isRifle ? 22 : 15;
+      const gy = 4;
+      const glintPulse = Math.sin(state.time * 26) > 0;
+      g.fillStyle = glintPulse ? '#ffffff' : P.brass[0];
+      g.fillRect(gx, gy - 1, 2, 2);
+      if (t.telegraphFrac > 0.6) {
+        g.fillStyle = '#ffffff';
+        g.fillRect(gx - 1, gy, 4, 1);
+        g.fillRect(gx + 1, gy - 2, 1, 4);
+      }
+    }
+
     g.restore();
 
     if (t.hp < t.maxHp || t.tough) {
@@ -1983,6 +2064,7 @@
   }
 
   function drawDeadBandits(g) {
+    if (G.CFG.spawnBandits === false) return;
     for (let i = 0; i < world.targets.length; i++) {
       const t = world.targets[i];
       if (t.kind === 'bandit' && !t.alive) {
@@ -1998,7 +2080,7 @@
       if (!t.alive) continue;
 
       if (t.kind === 'bandit') {
-        drawBanditAlive(g, t);
+        if (G.CFG.spawnBandits !== false) drawBanditAlive(g, t);
         continue;
       }
 
@@ -2320,12 +2402,6 @@
       g.fillStyle = P.steelDark[0];
       g.fillRect(barX, -1, steelLen, 1);
 
-      // Рука персонажа
-      g.fillStyle = P.cloth ? P.cloth[2] : '#293038';
-      g.fillRect(Math.round(recStart + 5 * pitchScale + 1), Math.round(-5 + wallFrac * 1.2), 4, 3);
-      g.fillStyle = P.skin ? P.skin[1] : '#c49876';
-      g.fillRect(Math.round(recStart + 7 * pitchScale + 2), Math.round(-3.5 + wallFrac * 1.2), 3, 3);
-
       // Характерная скоба-рычаг Генри снизу коробки (пиксельно, без stroke)
       const swing = ws.cockTimer > 0 ? Math.sin(cockProg * Math.PI) : 0;
       const lx = recStart + 1 - Math.round(swing * 2.5);
@@ -2334,6 +2410,48 @@
       g.fillRect(lx, ly, 4, 3);
       g.fillStyle = P.brass[2];
       g.fillRect(lx + 1, ly + 1, 2, 1);
+
+      // ==================== РЕАЛИСТИЧНЫЙ ДВУРУЧНЫЙ ХВАТ ВИНЧЕСТЕРА ====================
+      // 1. Передняя (левая) рука: вытянутый рукав плаща от левого плеча и кисть под деревянным цевьём
+      const foreMidX = Math.round(barX + foreLen * 0.44);
+      // Рукав плаща левой руки (G.PAL.cloth), тянущийся вперед от плеча
+      g.fillStyle = P.outline || '#140f0c';
+      g.fillRect(foreMidX - 5, Math.round(-9 + wallFrac * 1.4), 7, 4);
+      g.fillStyle = P.cloth ? P.cloth[3] : '#1c242b';
+      g.fillRect(foreMidX - 4, Math.round(-9 + wallFrac * 1.4), 6, 3);
+      g.fillStyle = P.cloth ? P.cloth[1] : '#35424f';
+      g.fillRect(foreMidX - 4, Math.round(-9 + wallFrac * 1.4), 6, 1);
+
+      // Предплечье к цевью
+      g.fillStyle = P.outline || '#140f0c';
+      g.fillRect(foreMidX - 3, Math.round(-6 + wallFrac * 1.2), 6, 4);
+      g.fillStyle = P.cloth ? P.cloth[2] : '#232d38';
+      g.fillRect(foreMidX - 2, Math.round(-5 + wallFrac * 1.2), 5, 3);
+
+      // Кисть левой руки (G.PAL.skin), уверенно поддерживающая деревянное цевьё снизу
+      g.fillStyle = P.outline || '#140f0c';
+      g.fillRect(foreMidX - 1, Math.round(-3 + wallFrac * 1.0), 5, 3);
+      g.fillStyle = P.skin ? P.skin[1] : '#c49876';
+      g.fillRect(foreMidX, Math.round(-2 + wallFrac * 1.0), 4, 2);
+      g.fillStyle = P.skin ? P.skin[0] : '#deb592';
+      g.fillRect(foreMidX, Math.round(-2 + wallFrac * 1.0), 3, 1);
+
+      // 2. Задняя (правая) рука: обхватывает шейку приклада / рычаг позади коробки
+      // Кисть двигается вместе с рычагом при взводе скобы (cockTimer > 0)
+      const rHandX = recStart + 1 - Math.round(swing * 2.5);
+      const rHandY = Math.round(swing * 4.5);
+      // Рукав правой руки
+      g.fillStyle = P.outline || '#140f0c';
+      g.fillRect(recStart - 3, 0, 4, 4);
+      g.fillStyle = P.cloth ? P.cloth[2] : '#232d38';
+      g.fillRect(recStart - 2, 1, 3, 3);
+      // Кисть правой руки на шейке/скобе
+      g.fillStyle = P.outline || '#140f0c';
+      g.fillRect(rHandX - 1, rHandY + 1, 4, 4);
+      g.fillStyle = P.skin ? P.skin[1] : '#c49876';
+      g.fillRect(rHandX, rHandY + 1, 3, 3);
+      g.fillStyle = P.skin ? P.skin[0] : '#deb592';
+      g.fillRect(rHandX, rHandY + 1, 3, 1);
     }
 
     if (ws.reloading) {
@@ -2782,6 +2900,21 @@
     const w = G.SIM.getWeapon(state);
     const ws = G.SIM.getWState(state);
 
+    if (ui.hpBarFill) {
+      const curHp = Math.max(0, p.hp !== undefined ? p.hp : 100);
+      const maxHp = p.maxHp || 100;
+      const pct = Math.round((curHp / maxHp) * 100);
+      ui.hpBarFill.style.width = `${pct}%`;
+      if (pct > 50) {
+        ui.hpBarFill.style.background = '#6d824d';
+      } else if (pct > 25) {
+        ui.hpBarFill.style.background = '#c89e45';
+      } else {
+        ui.hpBarFill.style.background = '#c9241c';
+      }
+      if (ui.hpNum) ui.hpNum.textContent = `${Math.round(curHp)} HP`;
+    }
+
     if (ui.zoneName) ui.zoneName.textContent = state.zoneLabel || 'САЛУН';
     if (ui.echoInfo) ui.echoInfo.textContent = state.echoDesc || 'ЗАКРЫТОЕ ПОМЕЩЕНИЕ';
 
@@ -2902,6 +3035,9 @@
     if (ui.btnToggleRays) {
       ui.btnToggleRays.textContent = `Лучи (V): ${G.CFG.debugRays ? 'ВКЛ' : 'ВЫКЛ'}`;
     }
+    if (ui.btnToggleBandits) {
+      ui.btnToggleBandits.textContent = `Бандиты: ${G.CFG.spawnBandits ? 'ВКЛ' : 'ВЫКЛ'}`;
+    }
   }
 
   // ==================== ГЛАВНЫЙ ЦИКЛ ====================
@@ -2923,6 +3059,7 @@
     for (let i = 0; i < world.solids.length; i++) {
       drawNoonShadow(pctx, world.solids[i]);
     }
+    drawCloudShadows(pctx);
 
     drawDecals(pctx);
     drawDeadBandits(pctx);

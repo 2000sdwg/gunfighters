@@ -317,6 +317,39 @@ html, body {
   text-overflow: ellipsis;
 }
 
+/* Компактный индикатор здоровья игрока */
+.hp-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(20, 15, 12, 0.72);
+  border: 1px solid #4a3828;
+  padding: 3px 6px;
+}
+
+.hp-bar-wrap {
+  flex: 1;
+  height: 6px;
+  background: #1a130f;
+  border: 1px solid #140f0c;
+  overflow: hidden;
+}
+
+.hp-bar-fill {
+  height: 100%;
+  background: #6d824d;
+  transition: width 0.15s ease, background-color 0.2s ease;
+}
+
+.hp-num {
+  font-size: 10px;
+  font-weight: bold;
+  color: #deb592;
+  min-width: 44px;
+  text-align: right;
+  letter-spacing: 0.5px;
+}
+
 .weapons-bar {
   display: flex;
   gap: 4px;

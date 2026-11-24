@@ -55,6 +55,8 @@
     pixelZoom: 2.0,
 
     playerRadius: 10,
+    playerMaxHp: 100,
+    spawnBandits: true,
     walkSpeed: 105,
     focusSpeed: 58,
     reloadSpeed: 52,
@@ -358,6 +360,10 @@
       player: {
         x: 150,
         y: 250,
+        hp: 100,
+        maxHp: 100,
+        hurtTimer: 0,
+        regenTimer: 0,
         vx: 0,
         vy: 0,
         speed: 0,
