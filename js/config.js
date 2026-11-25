@@ -2,6 +2,7 @@
   const G = (window.G = window.G || {});
 
   const STORAGE_KEY = 'gunfighter_keybinds_v1';
+  const SETTINGS_KEY = 'gunfighter_settings_v1';
 
   const DEFAULT_KEYS = {
     cock: 'ShiftLeft',
@@ -57,6 +58,13 @@
     playerRadius: 10,
     playerMaxHp: 100,
     spawnBandits: true,
+
+    // Боты: меткость 0..1 (влияет на разброс их выстрелов) и остановка появления новых
+    botAccuracy: 0.55,
+    pauseSpawn: false,
+    botMaxAlive: 6,
+    botSpawnInterval: 7.0,
+
     walkSpeed: 105,
     focusSpeed: 58,
     reloadSpeed: 52,
@@ -104,6 +112,37 @@
   G.resetKeys = function () {
     G.CFG.keys = { ...DEFAULT_KEYS };
     G.saveKeys();
+  };
+
+  // ==================== СОХРАНЕНИЕ ИГРОВЫХ НАСТРОЕК (МЕТКОСТЬ БОТОВ / СПАВН / ФИЗИКА) ====================
+
+  G.loadSettings = function () {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      if (typeof s.botAccuracy === 'number') {
+        G.CFG.botAccuracy = G.MATH.clamp(s.botAccuracy, 0, 1);
+      }
+      if (typeof s.pauseSpawn === 'boolean') G.CFG.pauseSpawn = s.pauseSpawn;
+      if (typeof s.spawnBandits === 'boolean') G.CFG.spawnBandits = s.spawnBandits;
+      if (s.phys && typeof s.phys === 'object') {
+        ['inertia', 'recoil', 'spring', 'echo'].forEach((k) => {
+          if (typeof s.phys[k] === 'number') G.CFG.phys[k] = s.phys[k];
+        });
+      }
+    } catch (_) {}
+  };
+
+  G.saveSettings = function () {
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+        botAccuracy: G.CFG.botAccuracy,
+        pauseSpawn: G.CFG.pauseSpawn,
+        spawnBandits: G.CFG.spawnBandits,
+        phys: { ...G.CFG.phys }
+      }));
+    } catch (_) {}
   };
 
   G.matchesKey = function (action, code) {
@@ -396,6 +435,7 @@
         inCover: false,
         peeking: false,
         peekFrac: 0,
+        peekSide: 1,
         coverObj: null,
         coverNormalX: 0,
         coverNormalY: 0,
@@ -424,4 +464,5 @@
   };
 
   G.loadKeys();
+  G.loadSettings();
 })();

@@ -359,7 +359,19 @@
           rgb = arr[(scaled - ci) > b ? Math.min(arr.length - 1, ci + 1) : ci];
         } else {
           // Пыльная улочка городка: выбеленный песок по центру, золотистая травяная подложка по обочинам
-          const verge = G.MATH.clamp((dFromCenter - 68) / 56 + (nBig - 0.5) * 0.45, 0, 1);
+          let verge = G.MATH.clamp((dFromCenter - 68) / 56 + (nBig - 0.5) * 0.45, 0, 1);
+
+          // Южное расширение карты: утоптанный двор-загон и грунтовая колея на юг
+          if (y > 452) {
+            const southRoadX = 1000 + Math.sin(y * 0.011) * 26;
+            const dSouth = Math.abs(x - southRoadX);
+            verge = G.MATH.clamp((dSouth - 86) / 78 + (nBig - 0.5) * 0.42, 0, 1);
+            // Внутри загона земля вытоптана копытами — почти без травяной подложки
+            if (x > 355 && x < 830 && y > 520 && y < 700) {
+              verge = Math.min(verge, 0.34 + (nMed - 0.5) * 0.18);
+            }
+          }
+
           if (x > 348 && verge > 0.52 + (b - 0.5) * 0.45) {
             // Подложка сухой травы на обочинах
             const gt = G.MATH.clamp(0.32 + (nMed - 0.5) * 0.48 + (nFine - 0.5) * 0.22, 0, 0.999) * (grassRgb.length - 1);
@@ -443,30 +455,48 @@
     drawSplitFence(ctx, 824, 404, 892, rng, P);
 
     // 4. Каменные россыпи и осыпи у подножия скал и по обочинам
-    for (let i = 0; i < 120; i++) {
-      const rx = 352 + rng() * 1020;
+    for (let i = 0; i < 210; i++) {
+      const rx = 352 + rng() * (width - 400);
       const inCanyon = rx > 855;
       const ry = inCanyon
-        ? (rng() < 0.72 ? (rng() < 0.5 ? 92 + rng() * 58 : 362 + rng() * 64) : 150 + rng() * 210)
+        ? (rng() < 0.72 ? (rng() < 0.5 ? 92 + rng() * 58 : 362 + rng() * 64) : 150 + rng() * (height - 250))
         : (rng() < 0.5 ? 124 + rng() * 44 : 344 + rng() * 46);
       drawPebbleCluster(ctx, rx, ry, rng, P, rng() < (inCanyon ? 0.45 : 0.22));
     }
 
-    // 5. Пышные заросли золотистой степной травы и полыни (450+ 1px пучков вдоль обочин!)
-    for (let i = 0; i < 420; i++) {
-      const gx = 348 + rng() * 1030;
-      const roadY = 256 + Math.sin(gx * 0.0085) * 14;
-      const side = rng() < 0.5 ? -1 : 1;
-      const distOut = 64 + Math.pow(rng(), 0.75) * 96;
-      const gy = G.MATH.clamp(roadY + side * distOut, 86, 434);
-      // Не залезаем на деревянные настилы
-      if (gx < 824 && (gy < 126 || gy > 390)) continue;
+    // Камни и щебень в южном дворе
+    for (let i = 0; i < 70; i++) {
+      const rx = 356 + rng() * (width - 420);
+      const ry = 520 + rng() * (height - 590);
+      drawPebbleCluster(ctx, rx, ry, rng, P, rng() < 0.3);
+    }
+
+    // 5. Пышные заросли золотистой степной травы и полыни (1px пучки вдоль обочин!)
+    for (let i = 0; i < 640; i++) {
+      const gx = 348 + rng() * (width - 400);
+      let gy;
+      if (rng() < 0.34) {
+        // Южное расширение: сухая степь за загоном
+        gy = 505 + rng() * (height - 575);
+        if (gx > 355 && gx < 830 && gy > 520 && gy < 700) continue; // вытоптанный загон оставляем чистым
+      } else {
+        const roadY = 256 + Math.sin(gx * 0.0085) * 14;
+        const side = rng() < 0.5 ? -1 : 1;
+        const distOut = 64 + Math.pow(rng(), 0.75) * 96;
+        gy = G.MATH.clamp(roadY + side * distOut, 86, 434);
+        // Не залезаем на деревянные настилы
+        if (gx < 824 && (gy < 126 || gy > 390)) continue;
+      }
       if (rng() < 0.16) {
         drawSageBush(ctx, gx, gy, rng, P);
       } else {
         drawTallGrassTuft(ctx, gx, gy, rng, P);
       }
     }
+
+    // Декоративные жерди-заборчики в южном дворе (в дополнение к укрытиям-секциям)
+    drawSplitFence(ctx, 900, 548, 1090, rng, P);
+    drawSplitFence(ctx, 1310, 604, 1470, rng, P);
 
     // Колесо от повозки у крыльца салуна (референс 1)
     drawWagonWheelProp(ctx, 350, 174, P);
@@ -897,7 +927,7 @@
     c.height = s.h;
     const ctx = c.getContext('2d');
     const isNorth = s.y < 150;
-    const isEast = s.x > 1350;
+    const isEast = !!s.edgeEast;
 
     for (let y = 0; y < s.h; y++) {
       for (let x = 0; x < s.w; x++) {
@@ -1133,6 +1163,177 @@
     return { canvas: c, ox: -cx, oy: -cy };
   }
 
+  // Тюк сена — новое укрытие южного двора (плотная солома + верёвочные стяжки)
+  function bakeHaySprite(s, P) {
+    const c = document.createElement('canvas');
+    c.width = s.w;
+    c.height = s.h;
+    const ctx = c.getContext('2d');
+    const w = s.w;
+    const h = s.h;
+
+    // Контур со скошенными на 1px углами
+    ctx.fillStyle = '#20170f';
+    ctx.fillRect(1, 0, w - 2, h);
+    ctx.fillRect(0, 1, w, h - 2);
+
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const n = hash2(x + s.x, y + s.y);
+        let idx = n < 0.22 ? 0 : n < 0.60 ? 1 : n < 0.86 ? 2 : 3;
+        // Верх-лево на солнце, низ-право в полуденной тени
+        if (y <= 2 || x <= 2) idx = Math.max(0, idx - 1);
+        if (y >= h - 3 || x >= w - 3) idx = Math.min(4, idx + 1);
+        ctx.fillStyle = P.grass[idx];
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+
+    // Торчащие соломинки по кромке
+    for (let x = 2; x < w - 2; x += 3) {
+      if (hash2(x + s.y, 7) < 0.5) {
+        ctx.fillStyle = P.grass[0];
+        ctx.fillRect(x, 1, 1, 2);
+      }
+      if (hash2(x + s.x, 13) < 0.4) {
+        ctx.fillStyle = P.grass[3];
+        ctx.fillRect(x, h - 3, 1, 2);
+      }
+    }
+
+    // Верёвочные стяжки (leather)
+    const band1 = Math.floor(w * 0.30);
+    const band2 = Math.floor(w * 0.66);
+    [band1, band2].forEach((bx) => {
+      ctx.fillStyle = P.leather[4];
+      ctx.fillRect(bx, 1, 3, h - 2);
+      ctx.fillStyle = P.leather[2];
+      ctx.fillRect(bx, 1, 2, h - 2);
+      ctx.fillStyle = P.leather[0];
+      ctx.fillRect(bx, 1, 2, 1);
+    });
+
+    return { canvas: c, ox: 0, oy: 0 };
+  }
+
+  // Корыто с водой — укрытие с "водной" акустикой и брызгами (mat: water)
+  function bakeTroughSprite(s, P) {
+    const c = document.createElement('canvas');
+    c.width = s.w;
+    c.height = s.h;
+    const ctx = c.getContext('2d');
+    const w = s.w;
+    const h = s.h;
+
+    ctx.fillStyle = '#1a120c';
+    ctx.fillRect(1, 0, w - 2, h);
+    ctx.fillRect(0, 1, w, h - 2);
+
+    // Деревянные борта
+    ctx.fillStyle = P.woodWarm[2];
+    ctx.fillRect(1, 1, w - 2, h - 2);
+    ctx.fillStyle = P.woodWarm[0];
+    ctx.fillRect(1, 1, w - 2, 2);
+    ctx.fillStyle = P.woodWarm[4];
+    ctx.fillRect(1, h - 4, w - 2, 3);
+
+    // Внутренняя водная гладь со ступенчатыми тонами
+    const ix = 4;
+    const iy = 4;
+    const iw = w - 8;
+    const ih = h - 9;
+    ctx.fillStyle = P.water[3];
+    ctx.fillRect(ix, iy, iw, ih);
+    ctx.fillStyle = P.water[2];
+    ctx.fillRect(ix, iy, iw, Math.max(1, Math.floor(ih * 0.62)));
+    ctx.fillStyle = P.water[1];
+    ctx.fillRect(ix, iy, iw, Math.max(1, Math.floor(ih * 0.32)));
+    // Пиксельные блики-рябь
+    ctx.fillStyle = P.water[0];
+    ctx.fillRect(ix + 2, iy + 1, Math.max(2, Math.floor(iw * 0.35)), 1);
+    ctx.fillRect(ix + Math.floor(iw * 0.55), iy + Math.max(1, ih - 3), Math.max(2, Math.floor(iw * 0.28)), 1);
+
+    // Железные обручи на торцах
+    ctx.fillStyle = P.steelDark[3];
+    ctx.fillRect(2, 1, 2, h - 2);
+    ctx.fillRect(w - 4, 1, 2, h - 2);
+    ctx.fillStyle = P.steelDark[1];
+    ctx.fillRect(2, 1, 1, h - 2);
+    ctx.fillRect(w - 4, 1, 1, h - 2);
+
+    return { canvas: c, ox: 0, oy: 0 };
+  }
+
+  // Секция жердевого забора — укрытие (горизонтальная или вертикальная)
+  function bakeFenceSprite(s, P) {
+    const c = document.createElement('canvas');
+    c.width = s.w;
+    c.height = s.h;
+    const ctx = c.getContext('2d');
+    const w = s.w;
+    const h = s.h;
+    const horizontal = w >= h;
+    const rng = makeRng(s.x * 17 + s.y * 29 + 7);
+
+    ctx.fillStyle = 'rgba(20, 14, 10, 0.34)';
+    ctx.fillRect(2, 3, w, Math.max(2, Math.floor(h * 0.5)));
+
+    if (horizontal) {
+      // Две жерди с лёгким провисом
+      for (let pass = 0; pass < 2; pass++) {
+        const ry = Math.floor(h * (pass === 0 ? 0.24 : 0.58));
+        for (let x = 0; x < w; x++) {
+          const sag = Math.round(Math.sin((x / Math.max(1, w)) * Math.PI) * 1.2);
+          ctx.fillStyle = P.woodPale[4];
+          ctx.fillRect(x, ry + sag + 2, 1, 2);
+          ctx.fillStyle = P.woodPale[2];
+          ctx.fillRect(x, ry + sag, 1, 2);
+          ctx.fillStyle = P.woodPale[0];
+          ctx.fillRect(x, ry + sag, 1, 1);
+        }
+      }
+      // Столбы
+      for (let x = 2; x < w - 2; x += 26) {
+        const jitter = rng() < 0.5 ? 0 : 1;
+        ctx.fillStyle = 'rgba(20, 14, 10, 0.42)';
+        ctx.fillRect(x + 2, 1 + jitter, 4, h - 1);
+        ctx.fillStyle = P.woodPale[4];
+        ctx.fillRect(x, jitter, 4, h - 1);
+        ctx.fillStyle = P.woodPale[2];
+        ctx.fillRect(x, jitter, 3, h - 2);
+        ctx.fillStyle = P.woodPale[0];
+        ctx.fillRect(x, jitter, 1, 3);
+      }
+    } else {
+      // Вертикальная секция: два прогона и поперечные столбы
+      for (let pass = 0; pass < 2; pass++) {
+        const rx = Math.floor(w * (pass === 0 ? 0.26 : 0.60));
+        for (let y = 0; y < h; y++) {
+          const sag = Math.round(Math.sin((y / Math.max(1, h)) * Math.PI) * 1.2);
+          ctx.fillStyle = P.woodPale[4];
+          ctx.fillRect(rx + sag + 2, y, 2, 1);
+          ctx.fillStyle = P.woodPale[2];
+          ctx.fillRect(rx + sag, y, 2, 1);
+          ctx.fillStyle = P.woodPale[0];
+          ctx.fillRect(rx + sag, y, 1, 1);
+        }
+      }
+      for (let y = 2; y < h - 2; y += 26) {
+        const jitter = rng() < 0.5 ? 0 : 1;
+        ctx.fillStyle = 'rgba(20, 14, 10, 0.42)';
+        ctx.fillRect(1 + jitter, y + 2, w - 1, 4);
+        ctx.fillStyle = P.woodPale[4];
+        ctx.fillRect(jitter, y, w - 1, 4);
+        ctx.fillStyle = P.woodPale[2];
+        ctx.fillRect(jitter, y, w - 2, 3);
+        ctx.fillStyle = P.woodPale[0];
+        ctx.fillRect(jitter, y, 3, 1);
+      }
+    }
+
+    return { canvas: c, ox: 0, oy: 0 };
+  }
+
   function bakeSolidSprites(solids, trees) {
     const P = getPal();
     for (let i = 0; i < solids.length; i++) {
@@ -1142,6 +1343,9 @@
       else if (s.type === 'boulder') s.baked = bakeBoulderSprite(s, P);
       else if (s.type === 'crate') s.baked = bakeCrateSprite(s, P);
       else if (s.type === 'wagon') s.baked = bakeWagonSprite(s, P);
+      else if (s.type === 'hay') s.baked = bakeHaySprite(s, P);
+      else if (s.type === 'trough') s.baked = bakeTroughSprite(s, P);
+      else if (s.type === 'fence') s.baked = bakeFenceSprite(s, P);
     }
     for (let i = 0; i < trees.length; i++) {
       trees[i].baked = bakeTreeSprite(trees[i], P);
@@ -1150,7 +1354,67 @@
 
   // ==================== МИШЕНИ И ПЕРЕБАЛАНСИРОВАННЫЕ БАНДИТЫ ====================
 
-  function createInitialTargets() {
+  let banditIdSeq = 1000;
+
+  // Единая фабрика бандита (используется и стартовым ростером, и рандомным спавном)
+  function makeBandit(id, x, y, opts) {
+    opts = opts || {};
+    return {
+      id: id,
+      x: x,
+      y: y,
+      homeX: x,
+      homeY: y,
+      kind: 'bandit',
+      mat: 'flesh',
+      r: 11,
+      hp: opts.hp || 80,
+      maxHp: opts.hp || 80,
+      alive: true,
+      hitFlash: 0,
+      hurtTimer: 0,
+      wobble: 0,
+      respawnTimer: 0,
+      name: opts.name || 'БАНДИТ',
+      coatColor: opts.coatColor || '#262423',
+      coatTrim: opts.coatTrim || '#3d3733',
+      hatColor: opts.hatColor || '#1c1714',
+      hatBand: opts.hatBand || '#7d2820',
+      bandana: opts.bandana || '#8a2b22',
+      gunType: opts.gunType || 'revolver',
+      tough: !!opts.tough,
+      angle: opts.angle !== undefined ? opts.angle : Math.PI,
+      patrolAmp: opts.patrolAmp || 16,
+      patrolSpeed: opts.patrolSpeed || 1.1,
+      patrolPhase: opts.patrolPhase || 0,
+      walkPhase: 0,
+      knockVx: 0,
+      knockVy: 0,
+      deathAnim: 0,
+      fallAngle: 0,
+      bloodPool: 0,
+      aimTimer: 0,
+      shootCooldown: 0.8 + ((opts.patrolPhase || 0) * 0.4) % 0.8,
+      aimState: 'patrol',
+      sightDist: 440,
+      shootRange: 380,
+      telegraphTime: 0.55,
+      wallRaiseFrac: 0
+    };
+  }
+
+  // Свободна ли точка под размещение бота (не внутри препятствий и не за краем карты)
+  function isFreeSpot(x, y, r, solids) {
+    for (let i = 0; i < solids.length; i++) {
+      const s = solids[i];
+      if (x > s.x - r && x < s.x + s.w + r && y > s.y - r && y < s.y + s.h + r) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function createInitialTargets(width, height, solids) {
     const list = [];
     let tid = 1;
 
@@ -1175,52 +1439,22 @@
     // Обычные бандиты 78–85 HP -> Winchester (92) ваншотит, Walker (50) — 2 выстрела, Lightning (28) — 3 выстрела.
     // Главарь в конце каньона 115 HP -> держит 1 выстрел из Винчестера.
     function addBandit(x, y, opts) {
-      list.push({
-        id: tid++,
-        x: x,
-        y: y,
-        homeX: x,
-        homeY: y,
-        kind: 'bandit',
-        mat: 'flesh',
-        r: 11,
-        hp: opts.hp || 80,
-        maxHp: opts.hp || 80,
-        alive: true,
-        hitFlash: 0,
-        hurtTimer: 0,
-        wobble: 0,
-        respawnTimer: 0,
-        name: opts.name || 'БАНДИТ',
-        coatColor: opts.coatColor || '#262423',
-        coatTrim: opts.coatTrim || '#3d3733',
-        hatColor: opts.hatColor || '#1c1714',
-        hatBand: opts.hatBand || '#7d2820',
-        bandana: opts.bandana || '#8a2b22',
-        gunType: opts.gunType || 'revolver',
-        tough: !!opts.tough,
-        angle: opts.angle !== undefined ? opts.angle : Math.PI,
-        patrolAmp: opts.patrolAmp || 16,
-        patrolSpeed: opts.patrolSpeed || 1.1,
-        patrolPhase: opts.patrolPhase || 0,
-        walkPhase: 0,
-        knockVx: 0,
-        knockVy: 0,
-        deathAnim: 0,
-        fallAngle: 0,
-        bloodPool: 0,
-        aimTimer: 0,
-        shootCooldown: 0.8 + ((opts.patrolPhase || 0) * 0.4) % 0.8,
-        aimState: 'patrol',
-        sightDist: 440,
-        shootRange: 380,
-        telegraphTime: 0.55
-      });
+      list.push(makeBandit(tid++, x, y, opts));
     }
 
-    // Бутылки на полке и барной стойке салуна
+    // Бутылки на полке салуна
     [84, 108, 134, 160, 186, 212].forEach((bx) => addTarget(bx, 96, 'bottle', 5, 1, 'glass'));
-    [98, 152, 204].forEach((bx) => addTarget(bx, 122, 'bottle', 5, 1, 'glass'));
+    // За барной стойкой — плотный ряд бутылок (интерактивный декор)
+    [76, 98, 120, 142, 164, 186, 208, 228].forEach((bx) => addTarget(bx, 106, 'bottle', 5, 1, 'glass'));
+    // На столешнице стойки
+    [98, 152, 204].forEach((bx) => addTarget(bx, 124, 'bottle', 5, 1, 'glass'));
+    // За столиками (на столешницах sal_tbl1 / sal_tbl2)
+    addTarget(101, 341, 'bottle', 5, 1, 'glass');
+    addTarget(126, 354, 'bottle', 5, 1, 'glass');
+    addTarget(112, 367, 'bottle', 5, 1, 'glass');
+    addTarget(227, 343, 'bottle', 5, 1, 'glass');
+    addTarget(252, 357, 'bottle', 5, 1, 'glass');
+    addTarget(236, 371, 'bottle', 5, 1, 'glass');
 
     // Узкая улочка: 3 бандита + бутылка + стальные попперы
     addBandit(508, 156, {
@@ -1302,13 +1536,86 @@
     });
     addTarget(1348, 210, 'steel', 12, 999, 'metal');
 
+    // --- ВОСТОЧНЫЙ КАНЬОН (расширение карты по X) ---
+    addTarget(1584, 162, 'bottle', 5, 1, 'glass');
+    addTarget(1500, 350, 'steel', 11, 999, 'metal');
+    addBandit(1520, 300, {
+      coatColor: '#2f3a2c', // выгоревший оливковый плащ
+      coatTrim: '#46553f',
+      hatColor: '#1d1712',
+      bandana: '#8a2b22',
+      gunType: 'rifle',
+      hp: 84,
+      patrolAmp: 20,
+      patrolSpeed: 1.0,
+      patrolPhase: 1.4
+    });
+    addBandit(1700, 470, {
+      coatColor: '#332a3b', // пыльно-сливовый плащ
+      coatTrim: '#4a3f55',
+      hatColor: '#191410',
+      bandana: '#b0752f',
+      gunType: 'revolver',
+      hp: 80,
+      patrolAmp: 18,
+      patrolSpeed: 1.15,
+      patrolPhase: 3.7
+    });
+
+    // --- ЮЖНЫЙ ДВОР / ЗАГОН (расширение карты по Y) ---
+    addTarget(608, 552, 'bottle', 5, 1, 'glass');
+    addTarget(1288, 584, 'bottle', 5, 1, 'glass');
+    addTarget(700, 660, 'steel', 10, 999, 'metal');
+    addTarget(1200, 700, 'steel', 11, 999, 'metal');
+    addTarget(1700, 560, 'steel', 11, 999, 'metal');
+    addBandit(520, 640, {
+      coatColor: '#3a2a20',
+      coatTrim: '#5a412f',
+      hatColor: '#221912',
+      bandana: '#8c2d23',
+      gunType: 'revolver',
+      hp: 78,
+      patrolAmp: 16,
+      patrolSpeed: 1.05,
+      patrolPhase: 0.6
+    });
+    addBandit(980, 660, {
+      coatColor: '#21262e',
+      coatTrim: '#39404a',
+      hatColor: '#191411',
+      bandana: '#a8352a',
+      gunType: 'rifle',
+      hp: 82,
+      patrolAmp: 22,
+      patrolSpeed: 0.95,
+      patrolPhase: 2.2
+    });
+
+    // Рандомный разброс стартовых точек: боты не стоят на жёстко зашитых координатах,
+    // но остаются в своей зоне и не появляются внутри препятствий.
+    for (let i = 0; i < list.length; i++) {
+      const t = list[i];
+      if (t.kind !== 'bandit') continue;
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const nx = G.MATH.clamp(t.homeX + G.MATH.rand(-70, 70), 70, width - 90);
+        const ny = G.MATH.clamp(t.homeY + G.MATH.rand(-60, 60), 100, height - 110);
+        if (!isFreeSpot(nx, ny, t.r + 8, solids)) continue;
+        t.x = Math.round(nx);
+        t.y = Math.round(ny);
+        t.homeX = t.x;
+        t.homeY = t.y;
+        break;
+      }
+    }
+
     return list;
   }
 
   G.WORLD = {
     create() {
-      const width = 1440;
-      const height = 520;
+      // Расширенная карта: восток (каньон) + юг (двор-загон)
+      const width = 1920;
+      const height = 760;
 
       const solids = [
         // --- САЛУН ---
@@ -1360,10 +1667,14 @@
         { id: 'cliff_n1', x: 838,  y: 0,   w: 168, h: 96,  mat: 'rock', type: 'cliff', high: true, isCover: true },
         { id: 'cliff_n2', x: 998,  y: 0,   w: 204, h: 74,  mat: 'rock', type: 'cliff', high: true, isCover: true },
         { id: 'cliff_n3', x: 1192, y: 0,   w: 248, h: 106, mat: 'rock', type: 'cliff', high: true, isCover: true },
-        { id: 'cliff_s1', x: 842,  y: 424, w: 182, h: 96,  mat: 'rock', type: 'cliff', high: true, isCover: true },
-        { id: 'cliff_s2', x: 1016, y: 444, w: 202, h: 76,  mat: 'rock', type: 'cliff', high: true, isCover: true },
-        { id: 'cliff_s3', x: 1206, y: 412, w: 234, h: 108, mat: 'rock', type: 'cliff', high: true, isCover: true },
-        { id: 'cliff_e',  x: 1396, y: 80,  w: 44,  h: 360, mat: 'rock', type: 'cliff', high: true, isCover: true },
+        { id: 'cliff_n4', x: 1440, y: 0,   w: 232, h: 88,  mat: 'rock', type: 'cliff', high: true, isCover: true },
+        { id: 'cliff_n5', x: 1672, y: 0,   w: 246, h: 74,  mat: 'rock', type: 'cliff', high: true, isCover: true },
+        { id: 'cliff_s1', x: 842,  y: height - 96,  w: 182, h: 96,  mat: 'rock', type: 'cliff', high: true, isCover: true },
+        { id: 'cliff_s2', x: 1016, y: height - 76,  w: 202, h: 76,  mat: 'rock', type: 'cliff', high: true, isCover: true },
+        { id: 'cliff_s3', x: 1206, y: height - 108, w: 234, h: 108, mat: 'rock', type: 'cliff', high: true, isCover: true },
+        { id: 'cliff_s4', x: 1440, y: height - 92,  w: 232, h: 92,  mat: 'rock', type: 'cliff', high: true, isCover: true },
+        { id: 'cliff_s5', x: 1672, y: height - 100, w: 246, h: 100, mat: 'rock', type: 'cliff', high: true, isCover: true },
+        { id: 'cliff_e',  x: width - 44, y: 80, w: 44, h: height - 160, mat: 'rock', type: 'cliff', high: true, isCover: true, edgeEast: true },
 
         // Валуны-укрытия в каньоне
         { id: 'rock_1', x: 948,  y: 214, w: 46, h: 42, mat: 'rock', type: 'boulder', high: false, isCover: true },
@@ -1372,7 +1683,33 @@
         { id: 'rock_4', x: 1266, y: 230, w: 42, h: 46, mat: 'rock', type: 'boulder', high: false, isCover: true },
         { id: 'rock_5', x: 1204, y: 218, w: 46, h: 42, mat: 'rock', type: 'boulder', high: false, isCover: true },
         { id: 'rock_6', x: 1324, y: 172, w: 44, h: 40, mat: 'rock', type: 'boulder', high: false, isCover: true },
-        { id: 'crate_7', x: 1010, y: 308, w: 34, h: 32, mat: 'wood', type: 'crate',   high: false, isCover: true }
+        { id: 'crate_7', x: 1010, y: 308, w: 34, h: 32, mat: 'wood', type: 'crate',   high: false, isCover: true },
+        { id: 'rock_8', x: 1500, y: 214, w: 46, h: 42, mat: 'rock', type: 'boulder', high: false, isCover: true },
+        { id: 'rock_9', x: 1662, y: 332, w: 50, h: 44, mat: 'rock', type: 'boulder', high: false, isCover: true },
+        { id: 'crate_11', x: 1580, y: 168, w: 34, h: 32, mat: 'wood', type: 'crate', high: false, isCover: true },
+        { id: 'wagon_4', x: 1720, y: 250, w: 60, h: 28, mat: 'wood', type: 'wagon', high: false, isCover: true },
+        { id: 'barrel_6', x: 1440, y: 400, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
+        { id: 'trough_2', x: 1758, y: 420, w: 54, h: 22, mat: 'water', type: 'trough', high: false, isCover: true },
+        { id: 'hay_4', x: 1618, y: 462, w: 32, h: 24, mat: 'hay', type: 'hay', high: false, isCover: true },
+
+        // --- ЮЖНЫЙ ДВОР / ЗАГОН (расширение карты вниз) ---
+        { id: 'fence_y1', x: 360, y: 540, w: 300, h: 12, mat: 'wood', type: 'fence', high: false, isCover: true },
+        { id: 'fence_y2', x: 360, y: 690, w: 120, h: 12, mat: 'wood', type: 'fence', high: false, isCover: true },
+        { id: 'fence_y7', x: 540, y: 690, w: 120, h: 12, mat: 'wood', type: 'fence', high: false, isCover: true },
+        { id: 'fence_y3', x: 360, y: 540, w: 12, h: 162, mat: 'wood', type: 'fence', high: false, isCover: true },
+        { id: 'fence_y4', x: 648, y: 540, w: 12, h: 162, mat: 'wood', type: 'fence', high: false, isCover: true },
+        { id: 'fence_y5', x: 1630, y: 556, w: 160, h: 12, mat: 'wood', type: 'fence', high: false, isCover: true },
+        { id: 'fence_y6', x: 880, y: 560, w: 12, h: 120, mat: 'wood', type: 'fence', high: false, isCover: true },
+        { id: 'hay_1', x: 430, y: 566, w: 36, h: 26, mat: 'hay', type: 'hay', high: false, isCover: true },
+        { id: 'hay_2', x: 478, y: 574, w: 30, h: 22, mat: 'hay', type: 'hay', high: false, isCover: true },
+        { id: 'hay_3', x: 1240, y: 592, w: 34, h: 26, mat: 'hay', type: 'hay', high: false, isCover: true },
+        { id: 'trough_1', x: 540, y: 622, w: 58, h: 22, mat: 'water', type: 'trough', high: false, isCover: true },
+        { id: 'crate_8', x: 596, y: 556, w: 32, h: 32, mat: 'wood', type: 'crate', high: false, isCover: true },
+        { id: 'crate_9', x: 700, y: 624, w: 30, h: 30, mat: 'wood', type: 'crate', high: false, isCover: true },
+        { id: 'crate_10', x: 1560, y: 620, w: 34, h: 32, mat: 'wood', type: 'crate', high: false, isCover: true },
+        { id: 'wagon_3', x: 962, y: 598, w: 62, h: 28, mat: 'wood', type: 'wagon', high: false, isCover: true },
+        { id: 'barrel_5', x: 1118, y: 660, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
+        { id: 'rock_7', x: 1458, y: 546, w: 46, h: 42, mat: 'rock', type: 'boulder', high: false, isCover: true }
       ];
 
       // Телеграфные столбы с проводами вдоль улицы (референсы 1 и 2)
@@ -1387,19 +1724,25 @@
       const trees = [
         { x: 576, y: 36, r: 18 },
         { x: 564, y: 456, r: 22 },
-        { x: 834, y: 406, r: 26 }
+        { x: 834, y: 406, r: 26 },
+        { x: 1352, y: 498, r: 22 },
+        { x: 764, y: 724, r: 20 },
+        { x: 1806, y: 646, r: 24 }
       ];
 
       bakeSolidSprites(solids, trees);
 
       const wallSegments = [];
       const barrelSegments = [];
+      const raiseSegments = [];
       const soundSegments = [];
 
       solids.forEach((s) => {
         const segs = rectToSegments(s);
         segs.forEach((seg) => {
           wallSegments.push(seg);
+          // Поднятие оружия работает у ЛЮБЫХ препятствий (стены, ящики, бочки, столбы, заборы)
+          raiseSegments.push(seg);
           if (s.high) {
             barrelSegments.push(seg);
             soundSegments.push(seg);
@@ -1422,19 +1765,73 @@
         trees,
         wallSegments,
         barrelSegments,
+        raiseSegments,
         soundSegments,
         doors,
-        targets: createInitialTargets(),
+        // Интерьер салуна (для клипа облачных теней и логики дневного света)
+        saloon: { x: 24, y: 70, w: 316, h: 380 },
+        spawnTimer: 0,
+        targets: createInitialTargets(width, height, solids),
         bgCanvas: bakeBackground(width, height),
+
+        // Рандомная точка появления бота: внутри игровых зон, без пересечения с препятствиями
+        pickSpawnPoint(player, nearX, nearY) {
+          const zones = [
+            { x1: 352, y1: 132, x2: 820, y2: 388 },                 // узкая улочка
+            { x1: 862, y1: 120, x2: width - 90, y2: 396 },          // каньон (запад и восток)
+            { x1: 368, y1: 512, x2: width - 100, y2: height - 120 } // южный двор-загон
+          ];
+          for (let attempt = 0; attempt < 34; attempt++) {
+            const z = zones[Math.floor(Math.random() * zones.length)];
+            let x;
+            let y;
+            if (nearX !== undefined && nearY !== undefined) {
+              x = G.MATH.clamp(nearX + G.MATH.rand(-150, 150), z.x1, z.x2);
+              y = G.MATH.clamp(nearY + G.MATH.rand(-130, 130), z.y1, z.y2);
+            } else {
+              x = z.x1 + Math.random() * (z.x2 - z.x1);
+              y = z.y1 + Math.random() * (z.y2 - z.y1);
+            }
+            if (player && G.MATH.dist(x, y, player.x, player.y) < 230) continue;
+            if (!isFreeSpot(x, y, 18, solids)) continue;
+            return { x: Math.round(x), y: Math.round(y) };
+          }
+          return {
+            x: Math.round(nearX !== undefined ? nearX : 520),
+            y: Math.round(nearY !== undefined ? nearY : 640)
+          };
+        },
+
+        // Спавн нового бандита в случайном месте (авто-спавн и респавн после смерти)
+        spawnBandit(player, opts) {
+          const kits = [
+            { coatColor: '#262423', coatTrim: '#3d3733', hatColor: '#1c1714', bandana: '#8a2b22', gunType: 'revolver', hp: 78 },
+            { coatColor: '#22334a', coatTrim: '#395273', hatColor: '#2b1e16', bandana: '#96382b', gunType: 'rifle', hp: 82 },
+            { coatColor: '#473424', coatTrim: '#664d37', hatColor: '#241b14', bandana: '#78251d', gunType: 'revolver', hp: 80 },
+            { coatColor: '#363d33', coatTrim: '#4f594b', hatColor: '#211914', bandana: '#8a2b22', gunType: 'rifle', hp: 84 },
+            { coatColor: '#522620', coatTrim: '#733830', hatColor: '#1a1512', bandana: '#c49d56', gunType: 'revolver', hp: 80 },
+            { coatColor: '#2f3a2c', coatTrim: '#46553f', hatColor: '#1d1712', bandana: '#8a2b22', gunType: 'rifle', hp: 82 }
+          ];
+          const kit = opts || kits[Math.floor(Math.random() * kits.length)];
+          const spot = world.pickSpawnPoint(player);
+          const t = makeBandit(banditIdSeq++, spot.x, spot.y, kit);
+          t.patrolPhase = Math.random() * Math.PI * 2;
+          t.angle = Math.random() * Math.PI * 2;
+          world.targets.push(t);
+          return t;
+        },
 
         getZoneAt(x, y) {
           if (x < 336 && y > 70 && y < 450) {
             return { id: 'saloon', label: 'САЛУН' };
           }
-          if (x < 855) {
-            return { id: 'alley', label: 'УЗКАЯ УЛОЧКА' };
+          if (x >= 855) {
+            return { id: 'canyon', label: y > 470 ? 'ЮЖНЫЙ КАНЬОН' : 'УЩЕЛЬЕ КАНЬОНА' };
           }
-          return { id: 'canyon', label: 'УЩЕЛЬЕ КАНЬОНА' };
+          if (y > 470) {
+            return { id: 'yard', label: 'ДВОР И ЗАГОН' };
+          }
+          return { id: 'alley', label: 'УЗКАЯ УЛОЧКА' };
         },
 
         getSurfaceAt(x, y) {
@@ -1501,21 +1898,38 @@
                     t.angle = G.MATH.normAngle(t.angle + G.MATH.angleDiff(t.angle, want) * Math.min(1, dt * 4.5));
                   }
                 }
+
+                // Оружие бота тоже поднимается у любого препятствия (ящик, бочка, столб, забор)
+                let nearObstacle = false;
+                for (let ci = 0; ci < world.covers.length; ci++) {
+                  const c = world.covers[ci];
+                  if (c.id === t.id) continue;
+                  if (G.MATH.circleRectPush(t.x, t.y, t.r + 10, c).hit) {
+                    nearObstacle = true;
+                    break;
+                  }
+                }
+                t.wallRaiseFrac = G.MATH.lerp(t.wallRaiseFrac || 0, nearObstacle ? 1 : 0, Math.min(1, dt * 10));
               } else {
                 t.deathAnim = Math.min(1, t.deathAnim + dt * 3.4);
                 t.bloodPool = Math.min(1, t.bloodPool + dt * 0.65);
                 if (t.respawnTimer > 0) {
                   t.respawnTimer -= dt;
-                  if (t.respawnTimer <= 0) {
+                  // Остановка спавна: уже существующие боты живут, но новые не появляются
+                  if (t.respawnTimer <= 0 && !G.CFG.pauseSpawn) {
+                    const spot = world.pickSpawnPoint(player, t.homeX, t.homeY);
                     t.alive = true;
                     t.hp = t.maxHp;
-                    t.x = t.homeX;
-                    t.y = t.homeY;
+                    t.x = spot.x;
+                    t.y = spot.y;
+                    t.homeX = spot.x;
+                    t.homeY = spot.y;
                     t.knockVx = 0;
                     t.knockVy = 0;
                     t.deathAnim = 0;
                     t.bloodPool = 0;
                     t.wobble = 0.5;
+                    t.wallRaiseFrac = 0;
                   }
                 }
               }
@@ -1531,10 +1945,31 @@
               }
             }
           }
+
+          // Авто-спавн новых ботов в случайных местах (пока спавн не остановлен)
+          if (G.CFG.spawnBandits !== false) {
+            let aliveCount = 0;
+            let banditCount = 0;
+            for (let i = 0; i < world.targets.length; i++) {
+              const t = world.targets[i];
+              if (t.kind !== 'bandit') continue;
+              banditCount++;
+              if (t.alive) aliveCount++;
+            }
+            world.spawnTimer += dt;
+            if (world.spawnTimer >= (G.CFG.botSpawnInterval || 7)) {
+              world.spawnTimer = 0;
+              const cap = G.CFG.botMaxAlive || 6;
+              if (!G.CFG.pauseSpawn && banditCount < 18 && aliveCount < cap) {
+                world.spawnBandit(player);
+              }
+            }
+          }
         },
 
         resetTargets() {
-          world.targets = createInitialTargets();
+          world.targets = createInitialTargets(width, height, solids);
+          world.spawnTimer = 0;
         }
       };
 

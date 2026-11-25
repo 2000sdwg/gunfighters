@@ -23,6 +23,9 @@
     valSpring: document.getElementById('val-spring'),
     slEcho: document.getElementById('sl-echo'),
     valEcho: document.getElementById('val-echo'),
+    slAccuracy: document.getElementById('sl-accuracy'),
+    valAccuracy: document.getElementById('val-accuracy'),
+    btnToggleSpawn: document.getElementById('btn-toggle-spawn'),
     bindBtns: Array.from(document.querySelectorAll('.btn-bind')),
     btnResetBinds: document.getElementById('btn-reset-binds'),
     btnToggleRays: document.getElementById('btn-toggle-rays'),
@@ -92,7 +95,7 @@
   for (let i = 0; i < 42; i++) {
     dustMotes.push({
       x: (i * 97) % 1400,
-      y: 65 + ((i * 53) % 390),
+      y: 65 + ((i * 53) % 620),
       vx: 4 + (i % 5) * 1.4,
       vy: 0.6 + ((i % 3) - 1) * 0.8,
       phase: i * 1.3
@@ -443,87 +446,120 @@
       return c;
     }
 
-    // Детализированный фрагмент Winchester 1873 в габаритах 136x84
-    function bakeWinchesterRifle() {
+    // Крупный план УЗЛА ПЕРЕЗАРЯДКИ Winchester 1873 (136x84, прозрачный фон).
+    // Рисуем только узел: ствольную коробку, верхнее окно заряжания, боковую крышку,
+    // скобу-рычаг, часть цевья и короткие отрезки ствола и трубки магазина — не весь карабин.
+    function bakeWinchesterReceiver() {
       const { c, g } = makeOffscreen(RELOAD_W, RELOAD_H);
-      const baseY = 38;
       const colOut = P.outline || '#140f0c';
 
-      // Тень под винтовкой
-      g.fillStyle = 'rgba(0, 0, 0, 0.42)';
-      g.fillRect(6, baseY + 24, 124, 4);
+      // Тень под узлом
+      g.fillStyle = 'rgba(0, 0, 0, 0.32)';
+      g.fillRect(30, 76, 102, 4);
 
-      // Слева: фигурный деревянный приклад (гребень, пятка, шейка)
+      // --- Латунная ствольная коробка ---
       g.fillStyle = colOut;
-      g.fillRect(4, baseY + 4, 32, 22);
-      g.fillStyle = P.steelDark[2];
-      g.fillRect(4, baseY + 5, 3, 20);
-      g.fillStyle = P.woodWarm[2];
-      g.fillRect(7, baseY + 6, 28, 18);
-      g.fillStyle = P.woodWarm[0];
-      g.fillRect(7, baseY + 6, 28, 3);
-      g.fillStyle = P.woodWarm[3];
-      g.fillRect(7, baseY + 18, 28, 5);
-
-      // Центр: латунная ствольная коробка (Yellowboy / 1873)
-      g.fillStyle = colOut;
-      g.fillRect(35, baseY + 2, 44, 25);
+      g.fillRect(26, 36, 78, 32);
       g.fillStyle = P.brass[2];
-      g.fillRect(36, baseY + 3, 42, 23);
-      g.fillStyle = P.brass[0];
-      g.fillRect(36, baseY + 3, 42, 3);
+      g.fillRect(27, 37, 76, 30);
       g.fillStyle = P.brass[1];
-      g.fillRect(36, baseY + 6, 42, 16);
-      g.fillStyle = P.brass[3];
-      g.fillRect(36, baseY + 21, 42, 4);
-
-      // Винты боковой крышки коробки
-      g.fillStyle = P.lead[2];
-      g.fillRect(40, baseY + 8, 2, 2);
-      g.fillRect(70, baseY + 8, 2, 2);
-      g.fillRect(42, baseY + 18, 2, 2);
-
-      // Курок сзади коробки
-      g.fillStyle = P.steelDark[1];
-      g.fillRect(34, baseY - 2, 4, 6);
-      g.fillStyle = P.steelDark[0];
-      g.fillRect(34, baseY - 2, 4, 1);
-
-      // Справа: воронёный длинный ствол + подствольный магазин + цевьё
-      g.fillStyle = colOut;
-      g.fillRect(78, baseY + 4, 54, 7);
-      g.fillStyle = P.steelDark[1];
-      g.fillRect(78, baseY + 5, 53, 5);
-      g.fillStyle = P.steelDark[0];
-      g.fillRect(78, baseY + 5, 53, 2);
-      g.fillStyle = P.steelDark[3];
-      g.fillRect(78, baseY + 9, 53, 1);
-
-      // Мушка у дульного среза
-      g.fillStyle = P.steelDark[0];
-      g.fillRect(128, baseY + 2, 2, 3);
-
-      // Подствольная трубка магазина
-      g.fillStyle = colOut;
-      g.fillRect(78, baseY + 11, 48, 5);
-      g.fillStyle = P.steelDark[2];
-      g.fillRect(78, baseY + 12, 47, 3);
-      g.fillStyle = P.steelDark[1];
-      g.fillRect(78, baseY + 12, 47, 1);
-
-      // Деревянное цевьё
-      g.fillStyle = colOut;
-      g.fillRect(78, baseY + 12, 32, 11);
-      g.fillStyle = P.woodWarm[1];
-      g.fillRect(79, baseY + 13, 30, 9);
-      g.fillStyle = P.woodWarm[0];
-      g.fillRect(79, baseY + 13, 30, 2);
-
-      // Латунное кольцо цевья
+      g.fillRect(27, 41, 76, 22);
       g.fillStyle = P.brass[0];
-      g.fillRect(108, baseY + 11, 1, 12);
+      g.fillRect(27, 37, 76, 3);
+      g.fillStyle = P.brass[3];
+      g.fillRect(27, 60, 76, 7);
+      g.fillStyle = P.brass[4];
+      g.fillRect(27, 65, 76, 2);
+
+      // --- Боковая крышка коробки с винтами ---
+      g.fillStyle = P.brass[3];
+      g.fillRect(34, 43, 62, 16);
       g.fillStyle = P.brass[2];
-      g.fillRect(109, baseY + 11, 2, 12);
+      g.fillRect(35, 44, 60, 14);
+      g.fillStyle = P.brass[1];
+      g.fillRect(35, 44, 60, 1);
+      g.fillStyle = P.brass[0];
+      g.fillRect(44, 50, 42, 1);
+      g.fillStyle = P.lead[2];
+      g.fillRect(38, 46, 2, 2);
+      g.fillRect(92, 46, 2, 2);
+      g.fillRect(38, 55, 2, 2);
+      g.fillRect(92, 55, 2, 2);
+
+      // --- Курок и хвостовик позади коробки ---
+      g.fillStyle = colOut;
+      g.fillRect(20, 30, 8, 16);
+      g.fillStyle = P.steelDark[2];
+      g.fillRect(21, 31, 6, 14);
+      g.fillStyle = P.steelDark[0];
+      g.fillRect(21, 31, 3, 2);
+      g.fillStyle = P.steelDark[4];
+      g.fillRect(23, 36, 3, 7);
+
+      // --- Скоба-рычаг Генри снизу (кольцо, внутри прозрачно) ---
+      g.fillStyle = colOut;
+      g.fillRect(38, 66, 34, 5);
+      g.fillRect(38, 78, 34, 4);
+      g.fillRect(38, 66, 5, 16);
+      g.fillRect(67, 66, 5, 16);
+      g.fillStyle = P.brass[2];
+      g.fillRect(39, 67, 32, 3);
+      g.fillRect(39, 77, 32, 2);
+      g.fillRect(39, 67, 3, 12);
+      g.fillRect(68, 67, 3, 12);
+      g.fillStyle = P.brass[0];
+      g.fillRect(39, 67, 32, 1);
+      g.fillRect(39, 67, 3, 8);
+      // Спусковой крючок внутри скобы
+      g.fillStyle = P.steelDark[2];
+      g.fillRect(52, 70, 3, 6);
+      g.fillStyle = P.steelDark[0];
+      g.fillRect(52, 70, 1, 4);
+
+      // --- Короткий отрезок ствола (срез у правого края) ---
+      g.fillStyle = colOut;
+      g.fillRect(103, 39, 30, 8);
+      g.fillStyle = P.steelDark[2];
+      g.fillRect(104, 40, 29, 6);
+      g.fillStyle = P.steelDark[1];
+      g.fillRect(104, 40, 29, 3);
+      g.fillStyle = P.steelDark[0];
+      g.fillRect(104, 40, 29, 1);
+      g.fillStyle = P.steelDark[0];
+      g.fillRect(129, 37, 2, 3);
+      g.fillStyle = colOut;
+      g.fillRect(131, 39, 2, 8);
+
+      // --- Трубка магазина под стволом ---
+      g.fillStyle = colOut;
+      g.fillRect(100, 49, 27, 6);
+      g.fillStyle = P.steelDark[3];
+      g.fillRect(101, 50, 26, 4);
+      g.fillStyle = P.steelDark[1];
+      g.fillRect(101, 50, 26, 1);
+
+      // --- Часть деревянного цевья с латунным кольцом ---
+      g.fillStyle = colOut;
+      g.fillRect(96, 46, 28, 15);
+      g.fillStyle = P.woodWarm[1];
+      g.fillRect(97, 47, 26, 13);
+      g.fillStyle = P.woodWarm[0];
+      g.fillRect(97, 47, 24, 3);
+      g.fillStyle = P.woodWarm[3];
+      g.fillRect(97, 56, 26, 4);
+      g.fillStyle = P.brass[1];
+      g.fillRect(118, 46, 3, 15);
+      g.fillStyle = P.brass[0];
+      g.fillRect(118, 46, 1, 15);
+
+      // --- Верхнее окно заряжания: прорезь в верхней стенке коробки ---
+      g.clearRect(50, 36, 30, 9);
+      g.fillStyle = 'rgba(12, 9, 7, 0.55)';
+      g.fillRect(51, 37, 28, 8);
+      g.fillStyle = P.brass[0];
+      g.fillRect(50, 36, 30, 1);
+      g.fillStyle = P.brass[3];
+      g.fillRect(51, 44, 28, 2);
 
       return c;
     }
@@ -540,7 +576,7 @@
       angledCartridge: bakeAngledCartridge(),
       walkerFrame: bakeRevolverFrame(true),
       lightningFrame: bakeRevolverFrame(false),
-      winchesterRifle: bakeWinchesterRifle()
+      winchesterReceiver: bakeWinchesterReceiver()
     };
     return reloadAnim.caches;
   }
@@ -602,18 +638,18 @@
         reloadAnim.inserts = [];
         reloadAnim.gatePress = 0;
       } else if (ev.type === 'insert_tube') {
-        // Подача патрона под углом 35-42 градуса сбоку-сверху в окно коробки Винчестера
+        // Патрон подаётся сверху и уходит в верхнее окно ствольной коробки
         reloadAnim.inserts.push({
           kind: 'tube',
-          startX: 84,
-          startY: 10,
-          endX: 58,
-          endY: 40,
+          startX: 64,
+          startY: 0,
+          endX: 64,
+          endY: 0,
           t: 0,
-          dur: 0.20
+          dur: 0.22
         });
         reloadAnim.gatePress = 1.0;
-        reloadAnim.joltY = 2.6;
+        reloadAnim.joltY = 1.6;
       } else if (ev.type === 'close') {
         reloadAnim.hoverSlot = -1;
         reloadAnim.inserts = [];
@@ -767,57 +803,38 @@
       return;
     }
 
-    // ==================== ВИНЧЕСТЕР 1873 ====================
-    const jy = Math.round(G.MATH.lerp(30, 0, openFrac) + reloadAnim.joltY);
-    const baseY = 38 + jy;
+    // ==================== ВИНЧЕСТЕР 1873: УЗЕЛ ПЕРЕЗАРЯДКИ ====================
+    const fY = Math.round(G.MATH.lerp(24, 0, openFrac) + reloadAnim.joltY);
 
-    // Рисуем запечённый фрагмент Winchester 1873
-    rctx.drawImage(caches.winchesterRifle, 0, jy);
-
-    // Скоба-рычаг Генри снизу коробки (дёргается при gatePress)
-    const leverDrop = Math.round(reloadAnim.gatePress * 4);
-    rctx.fillStyle = P.outline || '#140f0c';
-    rctx.fillRect(42, baseY + 24 + leverDrop, 15, 6);
-    rctx.fillStyle = P.brass[2];
-    rctx.fillRect(43, baseY + 25 + leverDrop, 13, 4);
-    rctx.fillStyle = P.brass[0];
-    rctx.fillRect(43, baseY + 25 + leverDrop, 13, 1);
-
-    // Влетающий под углом 35-42 градуса патрон (пуля входит первой и уходит за переднюю латунную стенку)
+    // 1. Патрон подаётся сверху и уходит в верхнее окно коробки (рисуется ЗА фрагментом)
     for (let i = 0; i < reloadAnim.inserts.length; i++) {
       const ins = reloadAnim.inserts[i];
       if (ins.kind !== 'tube') continue;
       const p = G.MATH.clamp(ins.t / ins.dur, 0, 1);
       const ease = 1 - Math.pow(1 - p, 2);
-      const ix = Math.round(G.MATH.lerp(ins.startX, ins.endX, ease));
-      const iy = Math.round(G.MATH.lerp(ins.startY, ins.endY, ease));
-      const rot = G.MATH.lerp(-0.68, -0.15, ease);
-      rctx.save();
-      rctx.translate(ix, iy);
-      rctx.rotate(rot);
-      rctx.drawImage(caches.topCartridge, -4, -10);
-      rctx.restore();
+      const cartTop = Math.round(fY - 20 + ease * 58);
+      rctx.drawImage(caches.topCartridge, 60, cartTop);
     }
 
-    // Верхнее окно заряжания и передняя стенка коробки (патрон заходит за неё)
+    // 2. Запечённый фрагмент узла: коробка, окно, боковая крышка, скоба, цевьё, ствол
+    rctx.drawImage(caches.winchesterReceiver, 0, fY);
+
+    // 3. Крышка окна закрывается после досыла патрона
     const gateDip = Math.round(reloadAnim.gatePress * 3);
-    rctx.fillStyle = P.outline || '#140f0c';
-    rctx.fillRect(49, baseY + 2, 20, 6);
-    rctx.fillStyle = P.steelDark[2];
-    rctx.fillRect(50, baseY + 3 + gateDip, 18, Math.max(1, 4 - gateDip));
-
-    // Передняя латунная стенка коробки перед окном (перекрывает входящую пулю)
-    rctx.fillStyle = P.brass[1];
-    rctx.fillRect(48, baseY + 7, 22, 18);
+    rctx.fillStyle = P.brass[2];
+    rctx.fillRect(50, fY + 34 + gateDip, 30, 3);
     rctx.fillStyle = P.brass[0];
-    rctx.fillRect(48, baseY + 7, 22, 1);
-    rctx.fillStyle = P.brass[3];
-    rctx.fillRect(48, baseY + 21, 22, 4);
+    rctx.fillRect(50, fY + 34 + gateDip, 30, 1);
+    rctx.fillStyle = P.outline || '#140f0c';
+    rctx.fillRect(50, fY + 37 + gateDip, 30, 1);
 
+    // 4. Подсказка «сюда вставлять» — только целыми пикселями, без сглаженных линий
     if (ws.ammo < w.capacity) {
       const pulse = 0.45 + 0.4 * Math.sin(state.time * 5);
-      rctx.strokeStyle = `rgba(242, 218, 145, ${pulse})`;
-      rctx.strokeRect(48.5, baseY + 1.5, 21, 7);
+      rctx.fillStyle = `rgba(242, 218, 145, ${pulse})`;
+      rctx.fillRect(52, fY + 30, 1, 3);
+      rctx.fillRect(77, fY + 30, 1, 3);
+      rctx.fillRect(52, fY + 30, 26, 1);
     }
   }
 
@@ -917,6 +934,37 @@
       ui.controlsLegend.textContent =
         `WASD • ЛКМ огонь • ПКМ фокус • ${cockLbl} взвод • ${moveAct} • R зарядка`;
     }
+  }
+
+  function updateSpawnButton() {
+    if (!ui.btnToggleSpawn) return;
+    ui.btnToggleSpawn.textContent = G.CFG.pauseSpawn ? 'Спавн ботов: СТОП' : 'Спавн ботов: ИДЁТ';
+    ui.btnToggleSpawn.classList.toggle('btn-warn', !!G.CFG.pauseSpawn);
+  }
+
+  // Приводим элементы настроек к значениям из G.CFG (после загрузки из localStorage)
+  function syncSettingsUI() {
+    if (ui.slInertia && ui.valInertia) {
+      ui.slInertia.value = G.CFG.phys.inertia;
+      ui.valInertia.textContent = G.CFG.phys.inertia.toFixed(2);
+    }
+    if (ui.slRecoil && ui.valRecoil) {
+      ui.slRecoil.value = G.CFG.phys.recoil;
+      ui.valRecoil.textContent = G.CFG.phys.recoil.toFixed(2);
+    }
+    if (ui.slSpring && ui.valSpring) {
+      ui.slSpring.value = G.CFG.phys.spring;
+      ui.valSpring.textContent = G.CFG.phys.spring.toFixed(2);
+    }
+    if (ui.slEcho && ui.valEcho) {
+      ui.slEcho.value = G.CFG.phys.echo;
+      ui.valEcho.textContent = G.CFG.phys.echo.toFixed(2);
+    }
+    if (ui.slAccuracy && ui.valAccuracy) {
+      ui.slAccuracy.value = G.CFG.botAccuracy;
+      ui.valAccuracy.textContent = `${Math.round(G.CFG.botAccuracy * 100)}%`;
+    }
+    updateSpawnButton();
   }
 
   function bindEvents() {
@@ -1048,12 +1096,32 @@
         const v = parseFloat(el.value);
         G.CFG.phys[key] = v;
         valEl.textContent = v.toFixed(2);
+        G.saveSettings();
       });
     }
     bindSlider(ui.slInertia, ui.valInertia, 'inertia');
     bindSlider(ui.slRecoil, ui.valRecoil, 'recoil');
     bindSlider(ui.slSpring, ui.valSpring, 'spring');
     bindSlider(ui.slEcho, ui.valEcho, 'echo');
+
+    // Ползунок меткости ботов: чем ниже, тем шире разброс их выстрелов
+    if (ui.slAccuracy) {
+      ui.slAccuracy.addEventListener('input', () => {
+        G.CFG.botAccuracy = G.MATH.clamp(parseFloat(ui.slAccuracy.value), 0, 1);
+        if (ui.valAccuracy) ui.valAccuracy.textContent = `${Math.round(G.CFG.botAccuracy * 100)}%`;
+        G.saveSettings();
+      });
+    }
+
+    // Кнопка остановки спавна: существующие боты продолжают воевать
+    if (ui.btnToggleSpawn) {
+      ui.btnToggleSpawn.addEventListener('click', () => {
+        G.CFG.pauseSpawn = !G.CFG.pauseSpawn;
+        updateSpawnButton();
+        G.saveSettings();
+        G.SIM.showToast(state, G.CFG.pauseSpawn ? 'СПАВН ОСТАНОВЛЕН' : 'СПАВН ВОЗОБНОВЛЁН', 1.1);
+      });
+    }
 
     ui.bindBtns.forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -1083,6 +1151,7 @@
       ui.btnToggleBandits.addEventListener('click', () => {
         G.CFG.spawnBandits = !G.CFG.spawnBandits;
         ui.btnToggleBandits.textContent = `Бандиты: ${G.CFG.spawnBandits ? 'ВКЛ' : 'ВЫКЛ'}`;
+        G.saveSettings();
       });
     }
 
@@ -1110,6 +1179,9 @@
     if (s.type === 'wagon') return 8;
     if (s.type === 'boulder') return 8;
     if (s.type === 'water_barrel') return 6;
+    if (s.type === 'hay') return 7;
+    if (s.type === 'trough') return 5;
+    if (s.type === 'fence') return 9;
     return 6;
   }
 
@@ -1155,56 +1227,137 @@
   }
 
   let cloudCaches = null;
+
+  // Детерминированный хеш для рваных пиксельных краёв облачной тени
+  function hashPix(ix, iy) {
+    let n = (ix * 374761393 + iy * 668265263) ^ 0x5bf03635;
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+  }
+
   function initCloudCaches() {
     if (cloudCaches) return cloudCaches;
+
+    // Пиксельный силуэт облака: кластер прямоугольных пятен с рваными краями.
+    // Мягкость — только за счёт rgba и ступеней плотности, без сглаживания.
     function bakeOneCloud(w, h, seed) {
       const { c, g } = makeOffscreen(w, h);
       const rng = makeRng(seed);
-      // Холодная полупрозрачная органическая пиксельная тень облака (~0.15 альфа)
-      g.fillStyle = 'rgba(22, 28, 44, 0.15)';
-      const blobs = 10 + Math.floor(rng() * 5);
-      for (let i = 0; i < blobs; i++) {
-        const ew = Math.round(w * 0.28 + rng() * (w * 0.36));
-        const eh = Math.round(h * 0.32 + rng() * (h * 0.36));
-        const ex = Math.round(w * 0.18 + rng() * (w * 0.62));
-        const ey = Math.round(h * 0.22 + rng() * (h * 0.54));
-        g.beginPath();
-        g.ellipse(ex, ey, ew * 0.5, eh * 0.5, 0.12, 0, Math.PI * 2);
-        g.fill();
+      const cell = 3;
+      const cols = Math.floor(w / cell);
+      const rows = Math.floor(h / cell);
+      const grid = new Float32Array(cols * rows);
+
+      // 5–7 перекрывающихся «пиксельных» ядер облака
+      const cores = [];
+      const coreCount = 5 + Math.floor(rng() * 3);
+      for (let i = 0; i < coreCount; i++) {
+        cores.push({
+          cx: (0.16 + rng() * 0.64) * cols,
+          cy: (0.28 + rng() * 0.44) * rows,
+          rx: (0.16 + rng() * 0.19) * cols,
+          ry: (0.17 + rng() * 0.19) * rows
+        });
       }
+
+      for (let cy = 0; cy < rows; cy++) {
+        for (let cx = 0; cx < cols; cx++) {
+          let v = 0;
+          for (let i = 0; i < cores.length; i++) {
+            const k = cores[i];
+            const dx = (cx - k.cx) / k.rx;
+            const dy = (cy - k.cy) / k.ry;
+            const val = 1 - Math.sqrt(dx * dx + dy * dy);
+            if (val > v) v = val;
+          }
+          // Сдвиг по SUN: силуэт вытянут и скошен в сторону солнца, не симметричен
+          const slant = ((rows - cy) / rows) * (cores[0].rx * 0.10);
+          const shifted = v - (cx < cores[0].cx - slant ? 0.06 : 0) - (cx > cores[0].cx + slant ? 0.02 : 0);
+          const noise = hashPix(cx + seed, cy * 3 + seed) - 0.5;
+          grid[cy * cols + cx] = shifted + noise * 0.42;
+        }
+      }
+
+      for (let cy = 0; cy < rows; cy++) {
+        for (let cx = 0; cx < cols; cx++) {
+          const v = grid[cy * cols + cx];
+          const px = cx * cell;
+          const py = cy * cell;
+          if (v > 0.34) {
+            // Плотное ядро
+            g.fillStyle = 'rgba(26, 32, 46, 0.16)';
+            g.fillRect(px, py, cell, cell);
+          } else if (v > 0.15) {
+            // Промежуточная плотность — честный пиксельный дизеринг по сетке
+            g.fillStyle = 'rgba(26, 32, 46, 0.11)';
+            if (((cx + cy) & 1) === 0) {
+              g.fillRect(px, py, cell, cell);
+            } else {
+              g.fillRect(px + 1, py, cell - 1, cell);
+              g.fillRect(px, py + 1, cell, cell - 1);
+            }
+          } else if (v > 0.02) {
+            // Рваная кромка: отдельные пиксельные «клочки»
+            if (hashPix(cx * 7 + seed, cy * 11 + seed) < 0.52) {
+              g.fillStyle = 'rgba(26, 32, 46, 0.08)';
+              g.fillRect(px, py, 2, 2);
+              if (hashPix(cx * 3 + seed, cy * 5 + seed) < 0.32) {
+                g.fillRect(px + 2, py + 1, 1, 1);
+              }
+            }
+          }
+        }
+      }
+
+      // Разрывы внутри силуэта (просветы между «клубами»)
+      for (let i = 0; i < 7; i++) {
+        const hx = Math.floor(rng() * cols) * cell;
+        const hy = Math.floor(rng() * rows) * cell;
+        if (grid[Math.floor(hy / cell) * cols + Math.floor(hx / cell)] <= 0.2) continue;
+        g.clearRect(hx, hy, cell, cell);
+      }
+
       return c;
     }
+
     cloudCaches = [
-      bakeOneCloud(260, 140, 114),
-      bakeOneCloud(340, 180, 227),
-      bakeOneCloud(280, 150, 339)
+      bakeOneCloud(264, 138, 114),
+      bakeOneCloud(342, 180, 227),
+      bakeOneCloud(282, 150, 339)
     ];
     return cloudCaches;
   }
 
   function drawCloudShadows(g) {
     const caches = initCloudCaches();
-    const period = world.width + 500;
+    const period = world.width + 520;
     // Бег облаков по ветру, синхронизированный с рябью бочек
     const drift = state.time * 22;
+    // Тень смещается вдоль направления SUN — облака «плывут» под наклоном, а не строго по оси X
+    const sunK = SUN.dy / Math.max(0.001, SUN.dx);
 
     const clouds = [
-      { img: caches[0], x: ((drift * 1.0 + 90) % period) - 250,   y: 60 + Math.sin(state.time * 0.05) * 16 },
-      { img: caches[1], x: ((drift * 1.15 + 580) % period) - 300,  y: 195 + Math.cos(state.time * 0.04) * 22 },
-      { img: caches[2], x: ((drift * 0.9 + 1140) % period) - 260, y: 325 + Math.sin(state.time * 0.06) * 18 }
+      { img: caches[0], x: ((drift * 1.0 + 90) % period) - 260,   y: 46 + Math.sin(state.time * 0.05) * 16 },
+      { img: caches[1], x: ((drift * 1.15 + 580) % period) - 310,  y: 178 + Math.cos(state.time * 0.04) * 22 },
+      { img: caches[2], x: ((drift * 0.9 + 1140) % period) - 270, y: 312 + Math.sin(state.time * 0.06) * 18 },
+      { img: caches[1], x: ((drift * 1.05 + 1560) % period) - 320, y: 470 + Math.sin(state.time * 0.045) * 20 },
+      { img: caches[0], x: ((drift * 0.95 + 300) % period) - 280, y: 596 + Math.cos(state.time * 0.05) * 16 }
     ];
 
     g.save();
-    // Строго исключаем интерьер салуна [0..336, 70..450] через аппаратный clip
+    // Строго исключаем интерьер салуна (границы берём из данных мира, а не хардкодом)
+    const sal = world.saloon || { x: 24, y: 70, w: 316, h: 380 };
     g.beginPath();
-    g.rect(0, 0, world.width, 70);
-    g.rect(0, 450, world.width, Math.max(10, world.height - 450));
-    g.rect(336, 70, Math.max(10, world.width - 336), 380);
+    g.rect(0, 0, world.width, sal.y);
+    g.rect(0, sal.y + sal.h, world.width, Math.max(10, world.height - (sal.y + sal.h)));
+    g.rect(sal.x + sal.w, sal.y, Math.max(10, world.width - (sal.x + sal.w)), sal.h);
     g.clip();
 
     for (let i = 0; i < clouds.length; i++) {
       const cl = clouds[i];
-      g.drawImage(cl.img, Math.round(cl.x), Math.round(cl.y));
+      const px = Math.round(cl.x);
+      const py = Math.round(cl.y + (cl.x - world.width * 0.5) * 0.02 * sunK);
+      g.drawImage(cl.img, px, py);
     }
     g.restore();
   }
@@ -1256,6 +1409,18 @@
           g.fillRect(Math.floor(w * 0.35), -1, 2, 1);
         }
         g.restore();
+      } else if (dc.kind === 'glasspool') {
+        // Лужица разлитого напитка и пиксельные осколки стекла на месте бутылки
+        const x = Math.round(dc.x);
+        const y = Math.round(dc.y);
+        g.fillStyle = dc.color;
+        g.fillRect(x - 4, y - 1, 8, 3);
+        g.fillRect(x - 2, y - 3, 5, 6);
+        g.fillStyle = 'rgba(184, 212, 217, 0.55)';
+        g.fillRect(x - 3, y - 1, 2, 1);
+        g.fillRect(x + 2, y + 1, 1, 1);
+        g.fillRect(x + 4, y - 2, 1, 1);
+        g.fillRect(x - 5, y + 2, 1, 1);
       } else {
         g.fillStyle = dc.color;
         const s = Math.max(1, Math.round(dc.r * 1.2));
@@ -1791,6 +1956,16 @@
 
   // ==================== БАНДИТЫ, ШЛЯПЫ И МИШЕНИ ====================
 
+  // Пиксельное «скругление» прямоугольника: 1px срезанные углы (без arc и сглаживания)
+  function fillRoundPix(g, x, y, w, h) {
+    if (w <= 2 || h <= 2) {
+      g.fillRect(x, y, w, h);
+      return;
+    }
+    g.fillRect(x + 1, y, w - 2, h);
+    g.fillRect(x, y + 1, w, h - 2);
+  }
+
   function drawBanditDead(g, t) {
     const P = getPal();
     const pool = t.bloodPool || 0;
@@ -1825,11 +2000,11 @@
     g.fillRect(-12, 2, 4, 2);
 
     g.fillStyle = '#120f0d';
-    g.fillRect(-9, -8, 16, 16);
+    fillRoundPix(g, -9, -8, 16, 16);
     g.fillStyle = t.coatColor;
-    g.fillRect(-8, -7, 14, 14);
+    fillRoundPix(g, -8, -7, 14, 14);
     g.fillStyle = t.coatTrim;
-    g.fillRect(-6, -5, 10, 10);
+    fillRoundPix(g, -6, -5, 10, 10);
 
     g.fillStyle = P.blood[1];
     g.fillRect(-2, -3, 5, 6);
@@ -1971,40 +2146,52 @@
     g.fillRect(Math.round(-2 + stride), -6, 5, 3);
     g.fillRect(Math.round(-2 - stride), 3, 5, 3);
 
-    // Пальто / плащ бандита
+    // Пальто / плащ бандита (скруглённый пиксельный силуэт)
     const coatLag = Math.round(Math.sin((t.walkPhase || 0) * 2) * 1.0);
+    const raiseFrac = t.wallRaiseFrac || 0;
     g.fillStyle = colOut;
-    g.fillRect(-10, -7 + coatLag, 4, 14);
+    fillRoundPix(g, -10, -7 + coatLag, 4, 14);
     g.fillStyle = t.coatColor;
-    g.fillRect(-9, -6 + coatLag, 3, 12);
+    fillRoundPix(g, -9, -6 + coatLag, 3, 12);
 
-    // Рука с оружием
+    // Рука с оружием (у препятствия ствол поднимается вверх и укорачивается)
+    const gunY = 4 - Math.round(raiseFrac * 1.6);
     g.fillStyle = t.coatColor;
     g.fillRect(2, 3, 5, 4);
     g.fillStyle = P.skin ? P.skin[1] : '#c49876';
     g.fillRect(5, 3.5, 3, 3);
     if (t.gunType === 'rifle') {
+      const gunLenR = Math.max(4, Math.round(12 * (1 - raiseFrac * 0.55)));
       g.fillStyle = P.woodWarm[2];
       g.fillRect(1, 4, 9, 2);
       g.fillStyle = P.steelDark[4];
-      g.fillRect(10, 4, 12, 2);
+      g.fillRect(10, gunY, gunLenR, 2);
       g.fillStyle = P.steelDark[1];
-      g.fillRect(10, 4, 11, 1);
+      g.fillRect(10, gunY, gunLenR - 1, 1);
+      if (raiseFrac > 0.3) {
+        g.fillStyle = P.steelDark[0];
+        g.fillRect(10 + gunLenR - 1, gunY - 1, 2, 3);
+      }
     } else {
+      const gunLenP = Math.max(3, Math.round(8 * (1 - raiseFrac * 0.5)));
       g.fillStyle = P.steelDark[3];
-      g.fillRect(7, 4, 8, 2);
+      g.fillRect(7, gunY, gunLenP, 2);
       g.fillStyle = P.steelDark[1];
-      g.fillRect(8, 4, 6, 1);
+      g.fillRect(8, gunY, Math.max(1, gunLenP - 1), 1);
+      if (raiseFrac > 0.3) {
+        g.fillStyle = P.steelDark[0];
+        g.fillRect(7 + gunLenP - 1, gunY - 1, 2, 3);
+      }
     }
 
-    // Тело
+    // Тело (скруглённые пиксельные углы — силуэт читается как человек, а не кубик)
     g.fillStyle = t.hitFlash > 0 ? '#f2dfb8' : colOut;
-    g.fillRect(-7, -10, 14, 20);
+    fillRoundPix(g, -7, -10, 14, 20);
     g.fillStyle = t.hitFlash > 0 ? '#fff2d4' : t.coatColor;
-    g.fillRect(-6, -9, 12, 18);
+    fillRoundPix(g, -6, -9, 12, 18);
     g.fillStyle = t.coatTrim;
-    g.fillRect(-5, -8, 6, 5);
-    g.fillRect(-5, 3, 6, 5);
+    fillRoundPix(g, -5, -8, 6, 5);
+    fillRoundPix(g, -5, 3, 6, 5);
     g.fillStyle = colOut;
     g.fillRect(-3, -6, 1, 12);
     g.fillStyle = P.woodWarm[1];
@@ -2022,8 +2209,8 @@
     // Телеграф прицеливания (блеск ствола при наведении на игрока)
     if (t.telegraphFrac > 0) {
       const isRifle = t.gunType === 'rifle';
-      const gx = isRifle ? 22 : 15;
-      const gy = 4;
+      const gx = Math.round((isRifle ? 21 : 14) - raiseFrac * 4);
+      const gy = 4 - Math.round(raiseFrac * 1.6);
       const glintPulse = Math.sin(state.time * 26) > 0;
       g.fillStyle = glintPulse ? '#ffffff' : P.brass[0];
       g.fillRect(gx, gy - 1, 2, 2);
@@ -2097,20 +2284,46 @@
       const ty = Math.round(t.y);
 
       const shLen = t.kind === 'bottle' ? 3 : 6;
-      g.fillStyle = 'rgba(20, 14, 9, 0.36)';
-      g.beginPath();
-      g.ellipse(tx + Math.round(SUN.dx * shLen), ty + Math.round(SUN.dy * shLen), t.r, t.r * 0.82, 0.3, 0, Math.PI * 2);
-      g.fill();
+      if (t.kind !== 'bottle') {
+        // Пиксельная тень мишени (у бутылок — своя, прямоугольная)
+        g.fillStyle = 'rgba(20, 14, 9, 0.36)';
+        g.beginPath();
+        g.ellipse(tx + Math.round(SUN.dx * shLen), ty + Math.round(SUN.dy * shLen), t.r, t.r * 0.82, 0.3, 0, Math.PI * 2);
+        g.fill();
+      }
 
       if (t.kind === 'bottle') {
-        g.fillStyle = '#1c150f';
-        g.fillRect(tx - 3, ty - 3, 6, 6);
-        g.fillStyle = t.id % 2 === 0 ? P.foliage[2] : P.woodWarm[1];
-        g.fillRect(tx - 2, ty - 2, 4, 4);
-        g.fillStyle = t.id % 2 === 0 ? P.foliage[0] : P.grass[1];
-        g.fillRect(tx - 2, ty - 2, 2, 2);
-        g.fillStyle = '#e8e3d5';
-        g.fillRect(tx - 1, ty - 1, 1, 1);
+        // Пиксельная бутылка: корпус, горлышко, пробка и блик стекла (только G.PAL)
+        const colOut = P.outline || '#140f0c';
+        const isGreen = t.id % 3 !== 0;
+        const bodyCol = isGreen ? P.foliage[2] : P.woodWarm[2];
+        const bodyLit = isGreen ? P.foliage[1] : P.woodWarm[1];
+
+        g.fillStyle = 'rgba(20, 14, 9, 0.34)';
+        g.fillRect(tx + 1, ty + 2, 6, 2);
+
+        // Корпус
+        g.fillStyle = colOut;
+        g.fillRect(tx - 3, ty - 2, 6, 5);
+        g.fillStyle = bodyCol;
+        g.fillRect(tx - 2, ty - 1, 4, 4);
+        g.fillStyle = bodyLit;
+        g.fillRect(tx - 2, ty - 1, 2, 3);
+
+        // Горлышко и пробка
+        g.fillStyle = colOut;
+        g.fillRect(tx - 2, ty - 5, 4, 4);
+        g.fillStyle = bodyCol;
+        g.fillRect(tx - 1, ty - 4, 2, 3);
+        g.fillStyle = P.woodPale[1];
+        g.fillRect(tx - 1, ty - 6, 2, 1);
+        g.fillStyle = colOut;
+        g.fillRect(tx - 1, ty - 7, 2, 1);
+
+        // Блик стекла
+        g.fillStyle = P.glass[0];
+        g.fillRect(tx - 1, ty - 1, 1, 2);
+        g.fillRect(tx - 4, ty, 1, 1);
       } else if (t.kind === 'steel') {
         g.fillStyle = '#1f2326';
         g.beginPath();
@@ -2419,40 +2632,45 @@
       g.fillStyle = P.brass[2];
       g.fillRect(lx + 1, ly + 1, 2, 1);
 
-      // ==================== РЕАЛИСТИЧНЫЙ ДВУРУЧНЫЙ ХВАТ ВИНЧЕСТЕРА ====================
-      // 1. Передняя (левая) рука: вытянутый рукав плаща от левого плеча и кисть под деревянным цевьём
-      const foreMidX = Math.round(barX + foreLen * 0.44);
-      // Рукав плаща левой руки (G.PAL.cloth), тянущийся вперед от плеча
+      // ==================== ДВУРУЧНЫЙ ХВАТ ВИНЧЕСТЕРА (без «оторванной» руки) ====================
+      // Левая рука идёт НЕПРЕРЫВНО от плеча в корпусе к цевью: плечо -> предплечье -> кисть.
+      const foreMidX = Math.round(barX + foreLen * 0.45);
+      const armMidX = Math.round((3 + foreMidX) * 0.5);
+      const lift = Math.round(wallFrac * 1.2);
+
+      // Плечо (внутри силуэта корпуса — визуально соединено с туловищем)
       g.fillStyle = P.outline || '#140f0c';
-      g.fillRect(foreMidX - 5, Math.round(-9 + wallFrac * 1.4), 7, 4);
-      g.fillStyle = P.cloth ? P.cloth[3] : '#1c242b';
-      g.fillRect(foreMidX - 4, Math.round(-9 + wallFrac * 1.4), 6, 3);
+      g.fillRect(2, -6 + lift, 6, 6);
       g.fillStyle = P.cloth ? P.cloth[1] : '#35424f';
-      g.fillRect(foreMidX - 4, Math.round(-9 + wallFrac * 1.4), 6, 1);
+      g.fillRect(3, -5 + lift, 5, 5);
+      g.fillStyle = P.cloth ? P.cloth[0] : '#4f5e6e';
+      g.fillRect(3, -5 + lift, 5, 1);
 
-      // Предплечье к цевью
+      // Предплечье (диагональ от плеча к цевью)
       g.fillStyle = P.outline || '#140f0c';
-      g.fillRect(foreMidX - 3, Math.round(-6 + wallFrac * 1.2), 6, 4);
+      g.fillRect(armMidX - 2, -5 + lift, 5, 5);
       g.fillStyle = P.cloth ? P.cloth[2] : '#232d38';
-      g.fillRect(foreMidX - 2, Math.round(-5 + wallFrac * 1.2), 5, 3);
+      g.fillRect(armMidX - 1, -4 + lift, 4, 4);
 
-      // Кисть левой руки (G.PAL.skin), уверенно поддерживающая деревянное цевьё снизу
+      // Запястье и кисть, поддерживающая деревянное цевьё снизу
       g.fillStyle = P.outline || '#140f0c';
-      g.fillRect(foreMidX - 1, Math.round(-3 + wallFrac * 1.0), 5, 3);
+      g.fillRect(foreMidX - 2, -2 + lift, 6, 5);
+      g.fillStyle = P.cloth ? P.cloth[3] : '#1c242b';
+      g.fillRect(foreMidX - 1, -1 + lift, 5, 4);
       g.fillStyle = P.skin ? P.skin[1] : '#c49876';
-      g.fillRect(foreMidX, Math.round(-2 + wallFrac * 1.0), 4, 2);
+      g.fillRect(foreMidX, 1 + lift, 4, 2);
       g.fillStyle = P.skin ? P.skin[0] : '#deb592';
-      g.fillRect(foreMidX, Math.round(-2 + wallFrac * 1.0), 3, 1);
+      g.fillRect(foreMidX, 1 + lift, 3, 1);
 
       // 2. Задняя (правая) рука: обхватывает шейку приклада / рычаг позади коробки
       // Кисть двигается вместе с рычагом при взводе скобы (cockTimer > 0)
       const rHandX = recStart + 1 - Math.round(swing * 2.5);
       const rHandY = Math.round(swing * 4.5);
-      // Рукав правой руки
+      // Рукав правой руки — от корпуса к шейке
       g.fillStyle = P.outline || '#140f0c';
-      g.fillRect(recStart - 3, 0, 4, 4);
-      g.fillStyle = P.cloth ? P.cloth[2] : '#232d38';
-      g.fillRect(recStart - 2, 1, 3, 3);
+      g.fillRect(recStart - 4, -1, 6, 5);
+      g.fillStyle = P.cloth ? P.cloth[1] : '#35424f';
+      g.fillRect(recStart - 3, 0, 5, 4);
       // Кисть правой руки на шейке/скобе
       g.fillStyle = P.outline || '#140f0c';
       g.fillRect(rHandX - 1, rHandY + 1, 4, 4);
@@ -2521,9 +2739,9 @@
       g.rotate(rollAng);
       g.scale(1.14 - Math.sin(prog * Math.PI) * 0.2, 0.82);
       g.fillStyle = colOut;
-      g.fillRect(-9, -8, 18, 16);
+      fillRoundPix(g, -9, -8, 18, 16);
       g.fillStyle = P.cloth ? P.cloth[2] : '#1e2730';
-      g.fillRect(-8, -7, 16, 14);
+      fillRoundPix(g, -8, -7, 16, 14);
       g.fillStyle = P.barnRed[1];
       g.fillRect(-2, -6, 4, 12);
       g.fillStyle = P.leather[3];
@@ -2532,36 +2750,58 @@
       return;
     }
 
-    g.rotate(p.aimAngle + bodySway);
-
-    if (p.inCover && !p.peeking) {
-      g.scale(0.9, 0.9);
+    // Поза укрытия: в «сложенном» виде корпус сжат, при выглядывании — наклон к цели
+    const peek = p.peekFrac || 0;
+    if (peek > 0.01) {
+      const lean = peek * 0.16 * (p.peekSide || 1);
+      g.rotate(p.aimAngle + bodySway + lean);
+      g.translate(peek * 2.2, peek * 0.8);
+      g.scale(1.02, 0.96);
+    } else {
+      g.rotate(p.aimAngle + bodySway);
+      if (p.inCover) g.scale(0.9, 0.9);
     }
 
     if (walking) {
       g.fillStyle = colOut;
-      g.fillRect(Math.round(-2 + stride), -6, 5, 3);
-      g.fillRect(Math.round(-2 - stride), 3, 5, 3);
+      fillRoundPix(g, Math.round(-2 + stride), -6, 5, 3);
+      fillRoundPix(g, Math.round(-2 - stride), 3, 5, 3);
+    } else if (peek > 0.25) {
+      // Опорная нога сзади — стойка «из-за укрытия»
+      g.fillStyle = colOut;
+      fillRoundPix(g, Math.round(-6 - peek * 2), 3, 6, 4);
+      g.fillStyle = P.leather[3];
+      fillRoundPix(g, Math.round(-5 - peek * 2), 4, 5, 3);
     }
 
     const coatLag = walking ? Math.round(Math.sin((p.walkPhase || 0) * 2) * 1.1) : 0;
     g.fillStyle = colOut;
-    g.fillRect(-10, -7 + coatLag, 4, 14);
+    fillRoundPix(g, -10, -7 + coatLag, 4, 14);
     g.fillStyle = P.cloth ? P.cloth[3] : '#1c242b';
-    g.fillRect(-9, -6 + coatLag, 3, 12);
+    fillRoundPix(g, -9, -6 + coatLag, 3, 12);
 
     drawWeapon(g, w, ws, p);
 
-    // Тело и плечи в плаще (cloth)
+    // Тело и плечи в плаще (cloth) — скруглённые пиксельные углы
     g.fillStyle = colOut;
-    g.fillRect(-7, -10, 14, 20);
+    fillRoundPix(g, -7, -10, 14, 20);
     g.fillStyle = P.cloth ? P.cloth[2] : '#1d252e';
-    g.fillRect(-6, -9, 12, 18);
+    fillRoundPix(g, -6, -9, 12, 18);
     g.fillStyle = P.cloth ? P.cloth[1] : '#33404d';
-    g.fillRect(-5, -8, 6, 5);
-    g.fillRect(-5, 3, 6, 5);
+    fillRoundPix(g, -5, -8, 6, 5);
+    fillRoundPix(g, -5, 3, 6, 5);
     g.fillStyle = P.cloth ? P.cloth[0] : '#475766';
     g.fillRect(-4, -8, 4, 2);
+
+    // Рука, опирающаяся на кромку укрытия при выглядывании (поверх корпуса, у самого края)
+    if (peek > 0.3) {
+      g.fillStyle = colOut;
+      g.fillRect(6, Math.round(1 - peek), 5, 5);
+      g.fillStyle = P.cloth ? P.cloth[1] : '#35424f';
+      g.fillRect(7, Math.round(2 - peek), 4, 4);
+      g.fillStyle = P.skin ? P.skin[1] : '#c49876';
+      g.fillRect(9, Math.round(5 - peek), 3, 2);
+    }
 
     // Патронташ / ремень (leather) и пряжка (brass)
     g.fillStyle = P.leather[2];
@@ -2630,8 +2870,8 @@
       m.x += m.vx * dt;
       m.y += (m.vy + Math.sin(state.time * 1.4 + m.phase) * 1.6) * dt;
       if (m.x > world.width) m.x -= world.width;
-      if (m.y < 65) m.y = 455;
-      if (m.y > 455) m.y = 65;
+      if (m.y < 65) m.y = world.height - 70;
+      if (m.y > world.height - 70) m.y = 65;
 
       const alpha = 0.24 + 0.16 * Math.sin(state.time * 2.2 + m.phase);
       g.fillStyle = P.grass[0];
@@ -3136,6 +3376,7 @@
     state.input.mouseY = viewH * 0.5;
     bindEvents();
     refreshKeybindLabels();
+    syncSettingsUI();
     updateHUD();
     requestAnimationFrame(loop);
   }

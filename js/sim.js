@@ -143,6 +143,11 @@
     const rx = -dy;
     const ry = dx;
 
+    // Ствол поднимается у ЛЮБЫХ препятствий: стены, ящики, бочки, столбы, заборы, столы
+    const segments = world.raiseSegments || world.barrelSegments;
+    // Своё укрытие не блокирует выстрел, пока герой из-за него выглядывает
+    const ignoreId = (player.inCover && player.coverObj) ? player.coverObj.id : null;
+
     const maxCheck = weapon.wallCheckLen + 5;
     const origins = [
       { x: pos.x + rx * 4.2, y: pos.y + ry * 4.2, len: maxCheck },
@@ -152,9 +157,14 @@
     let bestHit = null;
     for (let i = 0; i < origins.length; i++) {
       const o = origins[i];
-      const hit = G.MATH.raycastSegments(o.x, o.y, dx, dy, o.len, world.barrelSegments);
-      if (hit && (!bestHit || hit.dist < bestHit.dist)) {
-        bestHit = hit;
+      const limit = bestHit ? Math.min(o.len, bestHit.dist) : o.len;
+      for (let s = 0; s < segments.length; s++) {
+        const seg = segments[s];
+        if (ignoreId && seg.id === ignoreId) continue;
+        const hit = G.MATH.raySegment(o.x, o.y, dx, dy, limit, seg.x1, seg.y1, seg.x2, seg.y2);
+        if (hit && (!bestHit || hit.dist < bestHit.dist)) {
+          bestHit = hit;
+        }
       }
     }
     return bestHit;
@@ -347,6 +357,12 @@
     p.y = info.nearY + info.ny * (G.CFG.playerRadius + 1.5);
     p.vx = 0;
     p.vy = 0;
+    // Запоминаем "сложенную" позицию в укрытии: к ней герой возвращается после выглядывания
+    p.coverAnchorX = p.x;
+    p.coverAnchorY = p.y;
+    p.peekTargetX = p.x;
+    p.peekTargetY = p.y;
+    p.peekSide = 1;
     G.AUDIO.playCoverSnap();
     showToast(state, 'В УКРЫТИИ — ЗАЖМИ ПКМ, ЧТОБЫ ВЫГЛЯНУТЬ', 1.35);
   }
@@ -357,6 +373,8 @@
     p.inCover = false;
     p.peeking = false;
     p.coverObj = null;
+    p.coverAnchorX = undefined;
+    p.coverAnchorY = undefined;
   }
 
   function startRoll(state, world) {
@@ -940,7 +958,14 @@
 
           G.AUDIO.playShot(isRifle ? 'winchester' : 'walker', false);
 
-          const bAngle = t.angle + G.MATH.rand(-0.05, 0.05);
+          // Меткость бота из настроек: чем ниже значение, тем шире разброс выстрела
+          const acc = G.MATH.clamp(
+            G.CFG.botAccuracy !== undefined ? G.CFG.botAccuracy : 0.55,
+            0, 1
+          );
+          const distFactor = 0.85 + G.MATH.clamp(dist / 480, 0, 1) * 0.55;
+          const errRad = G.MATH.lerp(0.34, 0.010, acc) * distFactor * G.MATH.rand(0.65, 1.25);
+          const bAngle = t.angle + G.MATH.rand(-errRad, errRad);
           const bdx = Math.cos(bAngle);
           const bdy = Math.sin(bAngle);
           const muzzleX = t.x + bdx * 14;
@@ -1117,19 +1142,39 @@
           hitTarget.respawnTimer = 8.0;
           G.AUDIO.playImpact('glass');
           triggerHitConfirm(state, false);
-          spawnParticles(state, hx, hy, 12, {
-            baseAngle: Math.atan2(b.dy, b.dx),
-            spread: 1.2,
-            minSpeed: 35,
-            maxSpeed: 120,
-            minLife: 0.25,
-            maxLife: 0.55,
+          const bAng = Math.atan2(b.dy, b.dx);
+          // Крупные пиксельные осколки стекла (палитра G.PAL.glass)
+          spawnParticles(state, hx, hy, 14, {
+            baseAngle: bAng,
+            spread: 1.35,
+            minSpeed: 45,
+            maxSpeed: 155,
+            minLife: 0.22,
+            maxLife: 0.50,
             minSize: 1.2,
-            maxSize: 2.6,
-            colors: ['#6d824d', '#8ea164', '#c89e45'],
+            maxSize: 2.4,
+            drag: 6.5,
+            colors: [P.glass[0], P.glass[1], P.glass[2], P.glass[3]],
+            alpha: 0.92,
             kind: 'debris'
           });
-          addDecal(state, hitTarget.x, hitTarget.y, 4, 'rgba(109, 130, 77, 0.45)', { kind: 'glass' });
+          // Стеклянная пыль и мелкие брызги
+          spawnParticles(state, hx, hy, 8, {
+            baseAngle: bAng,
+            spread: 1.55,
+            minSpeed: 20,
+            maxSpeed: 70,
+            minLife: 0.14,
+            maxLife: 0.34,
+            minSize: 1.0,
+            maxSize: 1.8,
+            drag: 8.0,
+            colors: [P.cloud[0], P.glass[0]],
+            alpha: 0.70,
+            kind: 'debris'
+          });
+          // Лужица и осколки остаются на месте разбитой бутылки
+          addDecal(state, hitTarget.x, hitTarget.y, 5, 'rgba(77, 112, 117, 0.42)', { kind: 'glasspool' });
         } else if (hitTarget.kind === 'steel') {
           G.AUDIO.playImpact('metal');
           triggerHitConfirm(state, false);
@@ -1527,6 +1572,13 @@
           p.y = 250;
           p.vx = 0;
           p.vy = 0;
+          // Сбрасываем состояние укрытия, иначе герой «подтянется» к старому укрытию
+          p.inCover = false;
+          p.peeking = false;
+          p.coverObj = null;
+          p.coverAnchorX = undefined;
+          p.coverAnchorY = undefined;
+          p.peekFrac = 0;
           showToast(state, 'ВОЗРОЖДЕНИЕ В САЛУНЕ', 1.8);
         }
       }
@@ -1593,22 +1645,54 @@
         p.vy = 0;
         p.peeking = !!(input.rmb && !ws.reloading);
 
+        if (p.coverAnchorX === undefined || p.coverAnchorY === undefined) {
+          p.coverAnchorX = p.x;
+          p.coverAnchorY = p.y;
+        }
+
         if (p.coverObj) {
+          const c = p.coverObj;
           const aimX = Math.cos(p.targetAngle);
           const aimY = Math.sin(p.targetAngle);
-          if (!p.coverObj.high) {
+          const tx = -p.coverNormalY;
+          const ty = p.coverNormalX;
+          const side = (tx * aimX + ty * aimY) >= 0 ? 1 : -1;
+          p.peekSide = side;
+
+          // Направление выноса корпуса из-за укрытия
+          if (!c.high) {
             p.peekDirX = aimX * 0.55 - p.coverNormalX * 0.45;
             p.peekDirY = aimY * 0.55 - p.coverNormalY * 0.45;
           } else {
-            const tx = -p.coverNormalY;
-            const ty = p.coverNormalX;
-            const side = (tx * aimX + ty * aimY) >= 0 ? 1 : -1;
             p.peekDirX = tx * side;
             p.peekDirY = ty * side;
           }
           const len = Math.hypot(p.peekDirX, p.peekDirY) || 1;
           p.peekDirX /= len;
           p.peekDirY /= len;
+
+          // Ближайший к цели край укрытия: короткий пиксельный «шаг» вбок + вынос из-за кромки
+          const edge = G.CFG.playerRadius + 4;
+          const lateral = Math.min(16, Math.max(6, Math.min(c.w, c.h) * 0.5));
+          if (Math.abs(p.coverNormalX) >= Math.abs(p.coverNormalY)) {
+            p.peekTargetX = (p.coverNormalX > 0 ? c.x + c.w : c.x) + p.coverNormalX * edge;
+            p.peekTargetY = G.MATH.clamp(
+              p.coverAnchorY + ty * side * lateral,
+              c.y + 5, c.y + c.h - 5
+            );
+          } else {
+            p.peekTargetY = (p.coverNormalY > 0 ? c.y + c.h : c.y) + p.coverNormalY * edge;
+            p.peekTargetX = G.MATH.clamp(
+              p.coverAnchorX + tx * side * lateral,
+              c.x + 5, c.x + c.w - 5
+            );
+          }
+
+          const goalX = p.peeking ? p.peekTargetX : p.coverAnchorX;
+          const goalY = p.peeking ? p.peekTargetY : p.coverAnchorY;
+          const rate = p.peeking ? 10 : 7;
+          p.x = G.MATH.lerp(p.x, goalX, Math.min(1, dt * rate));
+          p.y = G.MATH.lerp(p.y, goalY, Math.min(1, dt * rate));
         }
 
         if (moveX !== 0 || moveY !== 0) {
