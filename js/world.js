@@ -293,9 +293,21 @@
     ctx.fillRect(cx - 1, cy - 1, 1, 1);
   }
 
+  // ==================== ЕДИНАЯ ГЕОМЕТРИЯ КАРТЫ (2200x780) ====================
+  // Расширение по X (каньон) и по Y (просторная улица + крупные северные амбары).
+  const MAP_W = 2200;
+  const MAP_H = 780;
+  // Сдвиг улицы, салуна и дверей вниз, чтобы северные амбары были по-настоящему крупными.
+  const STREET_SHIFT = 110;
+  const SALOON = { x: 24, y: 70 + STREET_SHIFT, w: 316, h: 380 }; // 24..340 × 180..560
+  const STREET_TOP = 102 + STREET_SHIFT;   // 212 — северный настил
+  const STREET_BOT = 392 + STREET_SHIFT;   // 502 — южный настил
+  const STREET_MID = 256 + STREET_SHIFT;   // 366 — ось дороги
+
   // ==================== ЗАПЕЧЁННЫЙ 1PX ФОН КАРТЫ ====================
 
   function bakeBackground(width, height) {
+    const SY = STREET_SHIFT;
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
@@ -317,7 +329,7 @@
         const idx4 = (y * width + x) * 4;
 
         // Внутри салуна — оставим базовый тёмный цвет, поверх нарисуем доски
-        if (x < 336 && y > 72 && y < 448) {
+        if (x < 336 && y > 72 + SY && y < 448 + SY) {
           data[idx4] = 56; data[idx4 + 1] = 38; data[idx4 + 2] = 24; data[idx4 + 3] = 255;
           continue;
         }
@@ -328,7 +340,7 @@
         const nFine = hash2(x, y);
 
         // Колеи от повозок, плавно извивающиеся от салуна вглубь каньона
-        const roadCenterY = 256 + Math.sin(x * 0.0085) * 14 + Math.cos(x * 0.021) * 4;
+        const roadCenterY = 256 + SY + Math.sin(x * 0.0085) * 14 + Math.cos(x * 0.021) * 4;
         const dFromCenter = Math.abs(y - roadCenterY);
         const rut1 = Math.abs(y - (roadCenterY - 21));
         const rut2 = Math.abs(y - (roadCenterY + 21));
@@ -362,12 +374,12 @@
           let verge = G.MATH.clamp((dFromCenter - 68) / 56 + (nBig - 0.5) * 0.45, 0, 1);
 
           // Южное расширение карты: утоптанный двор-загон и грунтовая колея на юг
-          if (y > 452) {
+          if (y > 452 + SY) {
             const southRoadX = 1000 + Math.sin(y * 0.011) * 26;
             const dSouth = Math.abs(x - southRoadX);
             verge = G.MATH.clamp((dSouth - 86) / 78 + (nBig - 0.5) * 0.42, 0, 1);
             // Внутри загона земля вытоптана копытами — почти без травяной подложки
-            if (x > 355 && x < 830 && y > 520 && y < 700) {
+            if (x > 40 && x < 342 && y > 588 && y < 748) {
               verge = Math.min(verge, 0.34 + (nMed - 0.5) * 0.18);
             }
           }
@@ -400,8 +412,8 @@
 
     // 2. Деревянные настилы-тротуары и веранды вдоль фасадов улицы (с козырьковыми тенями и ступенями)
     const boardwalks = [
-      { x: 340, y: 102, w: 482, h: 22, north: true },
-      { x: 340, y: 392, w: 484, h: 22, north: false }
+      { x: 340, y: 102 + SY, w: 500, h: 22, north: true },
+      { x: 340, y: 392 + SY, w: 502, h: 22, north: false }
     ];
     boardwalks.forEach((b) => {
       // Полуденная тень от кромки деревянного помоста на дорогу
@@ -451,41 +463,41 @@
     });
 
     // 3. Неровные деревенские заборы на выходе из городка к каньону (референс 3)
-    drawSplitFence(ctx, 822, 112, 886, rng, P);
-    drawSplitFence(ctx, 824, 404, 892, rng, P);
+    drawSplitFence(ctx, 840, 112 + SY, 906, rng, P);
+    drawSplitFence(ctx, 842, 404 + SY, 910, rng, P);
 
     // 4. Каменные россыпи и осыпи у подножия скал и по обочинам
-    for (let i = 0; i < 210; i++) {
+    for (let i = 0; i < 240; i++) {
       const rx = 352 + rng() * (width - 400);
       const inCanyon = rx > 855;
       const ry = inCanyon
-        ? (rng() < 0.72 ? (rng() < 0.5 ? 92 + rng() * 58 : 362 + rng() * 64) : 150 + rng() * (height - 250))
-        : (rng() < 0.5 ? 124 + rng() * 44 : 344 + rng() * 46);
+        ? (rng() < 0.72 ? (rng() < 0.5 ? 92 + rng() * 58 : 362 + rng() * 64) + SY : 150 + rng() * (height - 250))
+        : (rng() < 0.5 ? 124 + rng() * 44 + SY : 344 + rng() * 46 + SY);
       drawPebbleCluster(ctx, rx, ry, rng, P, rng() < (inCanyon ? 0.45 : 0.22));
     }
 
     // Камни и щебень в южном дворе
-    for (let i = 0; i < 70; i++) {
-      const rx = 356 + rng() * (width - 420);
-      const ry = 520 + rng() * (height - 590);
+    for (let i = 0; i < 80; i++) {
+      const rx = 40 + rng() * (width - 120);
+      const ry = 570 + rng() * (height - 640);
       drawPebbleCluster(ctx, rx, ry, rng, P, rng() < 0.3);
     }
 
     // 5. Пышные заросли золотистой степной травы и полыни (1px пучки вдоль обочин!)
-    for (let i = 0; i < 640; i++) {
+    for (let i = 0; i < 680; i++) {
       const gx = 348 + rng() * (width - 400);
       let gy;
       if (rng() < 0.34) {
-        // Южное расширение: сухая степь за загоном
-        gy = 505 + rng() * (height - 575);
-        if (gx > 355 && gx < 830 && gy > 520 && gy < 700) continue; // вытоптанный загон оставляем чистым
+        // Южное расширение: сухая степь за забором
+        gy = 505 + SY + rng() * (height - 575 - SY);
+        if (gx > 40 && gx < 342 && gy > 588 && gy < 748) continue; // вытоптанный загон оставляем чистым
       } else {
-        const roadY = 256 + Math.sin(gx * 0.0085) * 14;
+        const roadY = 256 + SY + Math.sin(gx * 0.0085) * 14;
         const side = rng() < 0.5 ? -1 : 1;
         const distOut = 64 + Math.pow(rng(), 0.75) * 96;
-        gy = G.MATH.clamp(roadY + side * distOut, 86, 434);
+        gy = G.MATH.clamp(roadY + side * distOut, 86 + SY, 434 + SY);
         // Не залезаем на деревянные настилы
-        if (gx < 824 && (gy < 126 || gy > 390)) continue;
+        if (gx < 842 && (gy < 126 + SY || gy > 390 + SY)) continue;
       }
       if (rng() < 0.16) {
         drawSageBush(ctx, gx, gy, rng, P);
@@ -495,14 +507,14 @@
     }
 
     // Декоративные жерди-заборчики в южном дворе (в дополнение к укрытиям-секциям)
-    drawSplitFence(ctx, 900, 548, 1090, rng, P);
-    drawSplitFence(ctx, 1310, 604, 1470, rng, P);
+    drawSplitFence(ctx, 380, 700, 560, rng, P);
+    drawSplitFence(ctx, 1360, 640, 1520, rng, P);
 
     // Колесо от повозки у крыльца салуна (референс 1)
-    drawWagonWheelProp(ctx, 350, 174, P);
+    drawWagonWheelProp(ctx, 350, 174 + SY, P);
 
     // 6. Пол салуна (детальные состаренные доски с текстурой волокон, щелями и гвоздями)
-    const sx = 32, sy = 78, sw = 300, sh = 364;
+    const sx = 32, sy = 78 + SY, sw = 300, sh = 364;
     const plankH = 10;
     for (let y = sy; y < sy + sh; y += plankH) {
       // Высокая вариативность оттенков досок по G.PAL.woodWarm
@@ -555,7 +567,7 @@
     for (let i = 0; i < 950; i++) {
       const t = rng();
       const pathX = 320 * (1 - t) + 148 * t + (rng() - 0.5) * 8;
-      const pathY = 255 * (1 - t) + 148 * t + Math.sin(t * Math.PI) * -14 + (rng() - 0.5) * 6;
+      const pathY = (255 + SY) * (1 - t) + (148 + SY) * t + Math.sin(t * Math.PI) * -14 + (rng() - 0.5) * 6;
       const spread = 7 + Math.sin(t * Math.PI) * 11;
       const px = Math.floor(pathX + (rng() - 0.5) * spread * 2);
       const py = Math.floor(pathY + (rng() - 0.5) * spread * 1.6);
@@ -568,7 +580,7 @@
     // Износ пола вдоль всей барной стойки (x: 72..228, y: 138..156)
     for (let i = 0; i < 520; i++) {
       const bx = 74 + Math.floor(rng() * 154);
-      const by = 138 + Math.floor(rng() * 16);
+      const by = 138 + SY + Math.floor(rng() * 16);
       if (rng() < 0.65) {
         ctx.fillStyle = rng() < 0.5 ? P.woodPale[2] : P.woodPale[1];
         ctx.fillRect(bx, by, 1 + (rng() < 0.4 ? 1 : 0), 1);
@@ -578,8 +590,8 @@
     // Занесённая сапогами пыль и песок у входа
     for (let i = 0; i < 320; i++) {
       const dx = 246 + Math.floor(rng() * 84);
-      const dy = 200 + Math.floor(rng() * 110);
-      const d = Math.hypot((dx - 324) * 0.75, dy - 255);
+      const dy = 200 + SY + Math.floor(rng() * 110);
+      const d = Math.hypot((dx - 324) * 0.75, dy - (255 + SY));
       if (d < 82 && rng() < 1 - d / 88) {
         ctx.fillStyle = rng() < 0.55 ? P.dirt[0] : P.dirt[1];
         ctx.fillRect(dx, dy, 1 + (rng() < 0.5 ? 1 : 0), 1);
@@ -588,14 +600,14 @@
 
     // Тёмные пятна пролитых напитков (виски, эль) у бара и столов
     const spillCenters = [
-      { x: 104, y: 144, r: 6 },
-      { x: 148, y: 142, r: 8 },
-      { x: 196, y: 145, r: 5 },
-      { x: 114, y: 324, r: 7 }, // у стола 1
-      { x: 134, y: 378, r: 5 },
-      { x: 236, y: 326, r: 8 }, // у стола 2
-      { x: 212, y: 382, r: 6 },
-      { x: 168, y: 284, r: 4 }
+      { x: 104, y: 144 + SY, r: 6 },
+      { x: 148, y: 142 + SY, r: 8 },
+      { x: 196, y: 145 + SY, r: 5 },
+      { x: 114, y: 324 + SY, r: 7 }, // у стола 1
+      { x: 134, y: 378 + SY, r: 5 },
+      { x: 236, y: 326 + SY, r: 8 }, // у стола 2
+      { x: 212, y: 382 + SY, r: 6 },
+      { x: 168, y: 284 + SY, r: 4 }
     ];
     spillCenters.forEach((sp) => {
       const r = sp.r;
@@ -635,9 +647,9 @@
       ctx.fillRect(cx, cy, 1 + (rng() < 0.3 ? 1 : 0), 1);
     }
     const tableScraps = [
-      { x: 92, y: 330, w: 46, h: 46 },
-      { x: 218, y: 334, w: 46, h: 46 },
-      { x: 256, y: 170, w: 18, h: 18 }
+      { x: 92, y: 330 + SY, w: 46, h: 46 },
+      { x: 218, y: 334 + SY, w: 46, h: 46 },
+      { x: 256, y: 170 + SY, w: 18, h: 18 }
     ];
     tableScraps.forEach((tb) => {
       for (let i = 0; i < 45; i++) {
@@ -653,7 +665,7 @@
     });
 
     // Узорчатый потёртый ковёр в салуне (бордовый + состаренная охра + бахрома)
-    const rx = 242, ry = 222, rw = 66, rh = 66;
+    const rx = 242, ry = 222 + SY, rw = 66, rh = 66;
     ctx.fillStyle = 'rgba(20, 15, 12, 0.38)';
     ctx.fillRect(rx + 2, ry + 2, rw, rh);
     // Бахрома по бокам
@@ -686,8 +698,8 @@
 
     // Деревянное крыльцо салуна снаружи распашных дверей
     ctx.fillStyle = 'rgba(20, 14, 9, 0.36)';
-    ctx.fillRect(336, 208, 22, 98);
-    for (let y = 206; y < 304; y += 5) {
+    ctx.fillRect(336, 208 + SY, 22, 98);
+    for (let y = 206 + SY; y < 304 + SY; y += 5) {
       ctx.fillStyle = y % 10 === 0 ? P.woodPale[2] : P.woodPale[3];
       ctx.fillRect(334, y, 22, 4);
       ctx.fillStyle = P.woodPale[1];
@@ -725,7 +737,7 @@
     ctx.fillRect(ox, oy, s.w, s.h);
 
     // 2. Видимый 2.5D-фасад со стороны улицы (горизонтальные доски обшивки + окна с рамами + дверь)
-    const facadeH = isNorth ? 26 : 12;
+    const facadeH = isNorth ? Math.max(26, Math.min(38, Math.round(s.h * 0.18))) : 12;
     const facadeY = isNorth ? oy + s.h - facadeH : oy + 1;
 
     ctx.fillStyle = wallPal[2];
@@ -1334,6 +1346,53 @@
     return { canvas: c, ox: 0, oy: 0 };
   }
 
+  // Низкая каменная стенка — простреливаемое укрытие (кладка из плитняка)
+  function bakeLowWallSprite(s, P) {
+    const c = document.createElement('canvas');
+    c.width = s.w;
+    c.height = s.h;
+    const ctx = c.getContext('2d');
+    const w = s.w;
+    const h = s.h;
+
+    // Контур и основание
+    ctx.fillStyle = P.outline || '#140f0c';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = P.stone[3];
+    ctx.fillRect(1, 1, w - 2, h - 2);
+
+    // Ряды кладки со сдвигом (пиксельные камни)
+    for (let row = 0; row < Math.max(2, Math.floor((h - 2) / 4)); row++) {
+      const y = 1 + row * 4;
+      if (y > h - 2) break;
+      const shift = (row & 1) * 5;
+      for (let x = 1; x < w - 1; x++) {
+        const k = hash2(x + s.x, y + s.y + row);
+        const seam = ((x + shift) % 11 === 0) || (y === 1) || (y >= h - 2);
+        if (seam) {
+          ctx.fillStyle = P.stone[4];
+        } else if (k < 0.28) {
+          ctx.fillStyle = P.stone[0];
+        } else if (k < 0.62) {
+          ctx.fillStyle = P.stone[1];
+        } else {
+          ctx.fillStyle = P.stone[2];
+        }
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+
+    // Солнечная кромка сверху и полуденная тень у основания
+    ctx.fillStyle = P.stone[0];
+    ctx.fillRect(1, 1, w - 2, 1);
+    ctx.fillStyle = P.stone[4];
+    ctx.fillRect(1, h - 2, w - 2, 1);
+    ctx.fillStyle = 'rgba(20, 14, 10, 0.34)';
+    ctx.fillRect(2, h, w - 2, 2);
+
+    return { canvas: c, ox: 0, oy: 0 };
+  }
+
   function bakeSolidSprites(solids, trees) {
     const P = getPal();
     for (let i = 0; i < solids.length; i++) {
@@ -1346,6 +1405,7 @@
       else if (s.type === 'hay') s.baked = bakeHaySprite(s, P);
       else if (s.type === 'trough') s.baked = bakeTroughSprite(s, P);
       else if (s.type === 'fence') s.baked = bakeFenceSprite(s, P);
+      else if (s.type === 'low_wall') s.baked = bakeLowWallSprite(s, P);
     }
     for (let i = 0; i < trees.length; i++) {
       trees[i].baked = bakeTreeSprite(trees[i], P);
@@ -1442,22 +1502,22 @@
       list.push(makeBandit(tid++, x, y, opts));
     }
 
-    // Бутылки на полке салуна
-    [84, 108, 134, 160, 186, 212].forEach((bx) => addTarget(bx, 96, 'bottle', 5, 1, 'glass'));
+    // Бутылки на полке салуна (интерьер сдвинут вместе с улицей)
+    [84, 108, 134, 160, 186, 212].forEach((bx) => addTarget(bx, 96 + STREET_SHIFT, 'bottle', 5, 1, 'glass'));
     // За барной стойкой — плотный ряд бутылок (интерактивный декор)
-    [76, 98, 120, 142, 164, 186, 208, 228].forEach((bx) => addTarget(bx, 106, 'bottle', 5, 1, 'glass'));
+    [76, 98, 120, 142, 164, 186, 208, 228].forEach((bx) => addTarget(bx, 106 + STREET_SHIFT, 'bottle', 5, 1, 'glass'));
     // На столешнице стойки
-    [98, 152, 204].forEach((bx) => addTarget(bx, 124, 'bottle', 5, 1, 'glass'));
+    [98, 152, 204].forEach((bx) => addTarget(bx, 124 + STREET_SHIFT, 'bottle', 5, 1, 'glass'));
     // За столиками (на столешницах sal_tbl1 / sal_tbl2)
-    addTarget(101, 341, 'bottle', 5, 1, 'glass');
-    addTarget(126, 354, 'bottle', 5, 1, 'glass');
-    addTarget(112, 367, 'bottle', 5, 1, 'glass');
-    addTarget(227, 343, 'bottle', 5, 1, 'glass');
-    addTarget(252, 357, 'bottle', 5, 1, 'glass');
-    addTarget(236, 371, 'bottle', 5, 1, 'glass');
+    addTarget(101, 341 + STREET_SHIFT, 'bottle', 5, 1, 'glass');
+    addTarget(126, 354 + STREET_SHIFT, 'bottle', 5, 1, 'glass');
+    addTarget(112, 367 + STREET_SHIFT, 'bottle', 5, 1, 'glass');
+    addTarget(227, 343 + STREET_SHIFT, 'bottle', 5, 1, 'glass');
+    addTarget(252, 357 + STREET_SHIFT, 'bottle', 5, 1, 'glass');
+    addTarget(236, 371 + STREET_SHIFT, 'bottle', 5, 1, 'glass');
 
-    // Узкая улочка: 3 бандита + бутылка + стальные попперы
-    addBandit(508, 156, {
+    // Главная улица: 3 бандита + бутылка + стальные попперы
+    addBandit(508, 156 + STREET_SHIFT, {
       coatColor: '#232830', // тёмно-угольный плащ (референс 1)
       coatTrim: '#3b424d',
       hatColor: '#1a1512',
@@ -1468,9 +1528,9 @@
       patrolSpeed: 1.05,
       patrolPhase: 0.4
     });
-    addTarget(565, 250, 'bottle', 5, 1, 'glass');
-    addTarget(615, 298, 'steel', 10, 999, 'metal');
-    addBandit(714, 224, {
+    addTarget(565, 250 + STREET_SHIFT, 'bottle', 5, 1, 'glass');
+    addTarget(615, 298 + STREET_SHIFT, 'steel', 10, 999, 'metal');
+    addBandit(714, 224 + STREET_SHIFT, {
       coatColor: '#22334a', // глубокий синий кафтан (референс 2)
       coatTrim: '#395273',
       hatColor: '#2b1e16',
@@ -1481,7 +1541,7 @@
       patrolSpeed: 0.9,
       patrolPhase: 1.9
     });
-    addBandit(696, 340, {
+    addBandit(696, 340 + STREET_SHIFT, {
       coatColor: '#473424', // шоколадно-коричневый плащ (референс 3)
       coatTrim: '#664d37',
       hatColor: '#241b14',
@@ -1492,11 +1552,11 @@
       patrolSpeed: 1.2,
       patrolPhase: 3.1
     });
-    addTarget(788, 344, 'steel', 10, 999, 'metal');
+    addTarget(788, 344 + STREET_SHIFT, 'steel', 10, 999, 'metal');
 
     // Ущелье каньона: 2 стрелка + крепкий главарь в чёрном плаще
-    addTarget(974, 232, 'bottle', 5, 1, 'glass');
-    addBandit(1024, 240, {
+    addTarget(1104, 232, 'bottle', 5, 1, 'glass');
+    addBandit(1154, 240, {
       coatColor: '#363d33', // пыльно-оливковый плащ
       coatTrim: '#4f594b',
       hatColor: '#211914',
@@ -1507,8 +1567,8 @@
       patrolSpeed: 0.95,
       patrolPhase: 0.9
     });
-    addTarget(1042, 178, 'steel', 11, 999, 'metal');
-    addBandit(1176, 274, {
+    addTarget(1172, 178, 'steel', 11, 999, 'metal');
+    addBandit(1306, 274, {
       coatColor: '#522620', // выцветший бордовый плащ
       coatTrim: '#733830',
       hatColor: '#1a1512',
@@ -1519,8 +1579,8 @@
       patrolSpeed: 1.15,
       patrolPhase: 2.5
     });
-    addTarget(1232, 164, 'steel', 11, 999, 'metal');
-    addBandit(1332, 294, {
+    addTarget(1362, 164, 'steel', 11, 999, 'metal');
+    addBandit(1462, 294, {
       name: 'ГЛАВАРЬ',
       coatColor: '#1c1b1a', // тяжёлый чёрный дастер
       coatTrim: '#3b3733',
@@ -1534,12 +1594,12 @@
       patrolSpeed: 1.0,
       patrolPhase: 4.2
     });
-    addTarget(1348, 210, 'steel', 12, 999, 'metal');
+    addTarget(1478, 210, 'steel', 12, 999, 'metal');
 
-    // --- ВОСТОЧНЫЙ КАНЬОН (расширение карты по X) ---
-    addTarget(1584, 162, 'bottle', 5, 1, 'glass');
-    addTarget(1500, 350, 'steel', 11, 999, 'metal');
-    addBandit(1520, 300, {
+    // --- ВОСТОЧНЫЙ КАНЬОН (вторая линия обхода) ---
+    addTarget(1840, 162, 'bottle', 5, 1, 'glass');
+    addTarget(1750, 350, 'steel', 11, 999, 'metal');
+    addBandit(1770, 300, {
       coatColor: '#2f3a2c', // выгоревший оливковый плащ
       coatTrim: '#46553f',
       hatColor: '#1d1712',
@@ -1550,7 +1610,7 @@
       patrolSpeed: 1.0,
       patrolPhase: 1.4
     });
-    addBandit(1700, 470, {
+    addBandit(1960, 470, {
       coatColor: '#332a3b', // пыльно-сливовый плащ
       coatTrim: '#4a3f55',
       hatColor: '#191410',
@@ -1562,13 +1622,12 @@
       patrolPhase: 3.7
     });
 
-    // --- ЮЖНЫЙ ДВОР / ЗАГОН (расширение карты по Y) ---
-    addTarget(608, 552, 'bottle', 5, 1, 'glass');
-    addTarget(1288, 584, 'bottle', 5, 1, 'glass');
-    addTarget(700, 660, 'steel', 10, 999, 'metal');
-    addTarget(1200, 700, 'steel', 11, 999, 'metal');
-    addTarget(1700, 560, 'steel', 11, 999, 'metal');
-    addBandit(520, 640, {
+    // --- ЮЖНЫЙ ДВОР / ЗАГОН ---
+    addTarget(180, 660, 'bottle', 5, 1, 'glass');
+    addTarget(700, 742, 'bottle', 5, 1, 'glass');
+    addTarget(150, 726, 'steel', 10, 999, 'metal');
+    addTarget(620, 690, 'steel', 11, 999, 'metal');
+    addBandit(200, 700, {
       coatColor: '#3a2a20',
       coatTrim: '#5a412f',
       hatColor: '#221912',
@@ -1579,7 +1638,7 @@
       patrolSpeed: 1.05,
       patrolPhase: 0.6
     });
-    addBandit(980, 660, {
+    addBandit(760, 736, {
       coatColor: '#21262e',
       coatTrim: '#39404a',
       hatColor: '#191411',
@@ -1614,120 +1673,130 @@
   G.WORLD = {
     create() {
       // Расширенная карта: восток (каньон) + юг (двор-загон)
-      const width = 1920;
-      const height = 760;
+      const width = MAP_W;
+      const height = MAP_H;
 
       const solids = [
-        // --- САЛУН ---
-        { id: 'sal_left',   x: 24,  y: 70,  w: 16,  h: 380, mat: 'wood', type: 'wall', high: true, isCover: true },
-        { id: 'sal_top',    x: 24,  y: 70,  w: 316, h: 16,  mat: 'wood', type: 'wall', high: true, isCover: true },
-        { id: 'sal_bot',    x: 24,  y: 434, w: 316, h: 16,  mat: 'wood', type: 'wall', high: true, isCover: true },
-        { id: 'sal_right1', x: 324, y: 70,  w: 16,  h: 146, mat: 'wood', type: 'wall', high: true, isCover: true },
-        { id: 'sal_right2', x: 324, y: 294, w: 16,  h: 156, mat: 'wood', type: 'wall', high: true, isCover: true },
+        // --- САЛУН (сдвинут вниз вместе с улицей) ---
+        { id: 'sal_left',   x: 24,  y: SALOON.y,       w: 16,  h: 380, mat: 'wood', type: 'wall', high: true, isCover: true },
+        { id: 'sal_top',    x: 24,  y: SALOON.y,       w: 316, h: 16,  mat: 'wood', type: 'wall', high: true, isCover: true },
+        { id: 'sal_bot',    x: 24,  y: SALOON.y + 364, w: 316, h: 16,  mat: 'wood', type: 'wall', high: true, isCover: true },
+        { id: 'sal_right1', x: 324, y: SALOON.y,       w: 16,  h: 146, mat: 'wood', type: 'wall', high: true, isCover: true },
+        { id: 'sal_right2', x: 324, y: SALOON.y + 224, w: 16,  h: 156, mat: 'wood', type: 'wall', high: true, isCover: true },
 
         // Внутри салуна
-        { id: 'sal_bar',    x: 68,  y: 112, w: 164, h: 24,  mat: 'wood', type: 'counter', high: false, isCover: true },
-        { id: 'sal_tbl1',   x: 92,  y: 330, w: 46,  h: 46,  mat: 'wood', type: 'table',   high: false, isCover: true },
-        { id: 'sal_tbl2',   x: 218, y: 334, w: 46,  h: 46,  mat: 'wood', type: 'table',   high: false, isCover: true },
-        { id: 'sal_pillar', x: 256, y: 170, w: 18,  h: 18,  mat: 'wood', type: 'pillar',  high: true,  isCover: true },
+        { id: 'sal_bar',    x: 68,  y: SALOON.y + 42,  w: 164, h: 24, mat: 'wood', type: 'counter', high: false, isCover: true },
+        { id: 'sal_tbl1',   x: 92,  y: SALOON.y + 260, w: 46,  h: 46, mat: 'wood', type: 'table',   high: false, isCover: true },
+        { id: 'sal_tbl2',   x: 218, y: SALOON.y + 264, w: 46,  h: 46, mat: 'wood', type: 'table',   high: false, isCover: true },
+        { id: 'sal_pillar', x: 256, y: SALOON.y + 100, w: 18,  h: 18, mat: 'wood', type: 'pillar',  high: true,  isCover: true },
 
-        // --- УЗКАЯ УЛОЧКА (амбарно-бордовый, сланцево-бирюзовый и выгоревший серый дома с референсов) ---
+        // --- СЕВЕРНЫЕ АМБАРЫ (крупные вестерн-пропорции + проулок между ними) ---
         {
-          id: 'bld_n1', x: 340, y: 10, w: 232, h: 92, mat: 'wood', type: 'building', high: true, isCover: true,
+          id: 'bld_n1', x: 336, y: 30, w: 260, h: 170, mat: 'wood', type: 'building', high: true, isCover: true,
           roof: '#55524c', wallTrim: '#862a20', roofPalKey: 'shingle', wallPalKey: 'barnRed', roofStyle: 'shingle', chimney: true
         },
         {
-          id: 'bld_n2', x: 580, y: 10, w: 242, h: 92, mat: 'wood', type: 'building', high: true, isCover: true,
+          id: 'bld_n2', x: 640, y: 30, w: 260, h: 170, mat: 'wood', type: 'building', high: true, isCover: true,
           roof: '#4d7075', wallTrim: '#4d7075', roofPalKey: 'slateTeal', wallPalKey: 'slateTeal', roofStyle: 'planks', chimney: false
         },
+        // --- ЮЖНЫЕ ДОМА (ниже южного настила) ---
         {
-          id: 'bld_s1', x: 340, y: 414, w: 224, h: 86, mat: 'wood', type: 'building', high: true, isCover: true,
+          id: 'bld_s1', x: 336, y: 524, w: 250, h: 158, mat: 'wood', type: 'building', high: true, isCover: true,
           roof: '#706c64', wallTrim: '#968770', roofPalKey: 'shingle', wallPalKey: 'woodPale', roofStyle: 'patchy', chimney: true
         },
         {
-          id: 'bld_s2', x: 574, y: 414, w: 248, h: 86, mat: 'wood', type: 'building', high: true, isCover: true,
+          id: 'bld_s2', x: 600, y: 524, w: 262, h: 158, mat: 'wood', type: 'building', high: true, isCover: true,
           roof: '#55524c', wallTrim: '#756652', roofPalKey: 'shingle', wallPalKey: 'woodPale', roofStyle: 'shingle', chimney: false
         },
 
-        // Укрытия и бочки с водой
-        { id: 'crate_1',  x: 428, y: 162, w: 34, h: 34, mat: 'wood',  type: 'crate',        high: false, isCover: true },
-        { id: 'crate_2',  x: 464, y: 170, w: 26, h: 26, mat: 'wood',  type: 'crate',        high: false, isCover: true },
-        { id: 'wagon_1',  x: 540, y: 238, w: 62, h: 28, mat: 'wood',  type: 'wagon',        high: false, isCover: true },
-        { id: 'crate_3',  x: 642, y: 320, w: 36, h: 32, mat: 'wood',  type: 'crate',        high: false, isCover: true },
-        { id: 'crate_4',  x: 742, y: 176, w: 32, h: 38, mat: 'wood',  type: 'crate',        high: false, isCover: true },
-        { id: 'wagon_2',  x: 712, y: 254, w: 60, h: 28, mat: 'wood',  type: 'wagon',        high: false, isCover: true },
-        { id: 'crate_5',  x: 512, y: 312, w: 32, h: 30, mat: 'wood',  type: 'crate',        high: false, isCover: true },
-        { id: 'crate_6',  x: 540, y: 316, w: 24, h: 24, mat: 'wood',  type: 'crate',        high: false, isCover: true },
-        { id: 'barrel_1', x: 366, y: 124, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
-        { id: 'barrel_2', x: 560, y: 366, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
-        { id: 'barrel_3', x: 786, y: 126, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
-        { id: 'barrel_4', x: 672, y: 164, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
+        // Укрытия и бочки с водой вдоль улицы
+        { id: 'crate_1',  x: 428, y: 272, w: 34, h: 34, mat: 'wood',  type: 'crate',        high: false, isCover: true },
+        { id: 'crate_2',  x: 464, y: 280, w: 26, h: 26, mat: 'wood',  type: 'crate',        high: false, isCover: true },
+        { id: 'wagon_1',  x: 540, y: 348, w: 62, h: 28, mat: 'wood',  type: 'wagon',        high: false, isCover: true },
+        { id: 'crate_3',  x: 642, y: 430, w: 36, h: 32, mat: 'wood',  type: 'crate',        high: false, isCover: true },
+        { id: 'crate_4',  x: 742, y: 286, w: 32, h: 38, mat: 'wood',  type: 'crate',        high: false, isCover: true },
+        { id: 'wagon_2',  x: 712, y: 364, w: 60, h: 28, mat: 'wood',  type: 'wagon',        high: false, isCover: true },
+        { id: 'crate_5',  x: 512, y: 422, w: 32, h: 30, mat: 'wood',  type: 'crate',        high: false, isCover: true },
+        { id: 'crate_6',  x: 540, y: 426, w: 24, h: 24, mat: 'wood',  type: 'crate',        high: false, isCover: true },
+        { id: 'barrel_1', x: 366, y: 234, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
+        { id: 'barrel_2', x: 560, y: 476, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
+        { id: 'barrel_3', x: 786, y: 236, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
+        { id: 'barrel_4', x: 672, y: 274, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
 
-        // --- УЩЕЛЬЕ КАНЬОНА ---
-        { id: 'cliff_n1', x: 838,  y: 0,   w: 168, h: 96,  mat: 'rock', type: 'cliff', high: true, isCover: true },
-        { id: 'cliff_n2', x: 998,  y: 0,   w: 204, h: 74,  mat: 'rock', type: 'cliff', high: true, isCover: true },
-        { id: 'cliff_n3', x: 1192, y: 0,   w: 248, h: 106, mat: 'rock', type: 'cliff', high: true, isCover: true },
-        { id: 'cliff_n4', x: 1440, y: 0,   w: 232, h: 88,  mat: 'rock', type: 'cliff', high: true, isCover: true },
-        { id: 'cliff_n5', x: 1672, y: 0,   w: 246, h: 74,  mat: 'rock', type: 'cliff', high: true, isCover: true },
-        { id: 'cliff_s1', x: 842,  y: height - 96,  w: 182, h: 96,  mat: 'rock', type: 'cliff', high: true, isCover: true },
-        { id: 'cliff_s2', x: 1016, y: height - 76,  w: 202, h: 76,  mat: 'rock', type: 'cliff', high: true, isCover: true },
-        { id: 'cliff_s3', x: 1206, y: height - 108, w: 234, h: 108, mat: 'rock', type: 'cliff', high: true, isCover: true },
-        { id: 'cliff_s4', x: 1440, y: height - 92,  w: 232, h: 92,  mat: 'rock', type: 'cliff', high: true, isCover: true },
-        { id: 'cliff_s5', x: 1672, y: height - 100, w: 246, h: 100, mat: 'rock', type: 'cliff', high: true, isCover: true },
+        // Низкие каменные стенки — новые простреливаемые укрытия на улице и во дворе
+        { id: 'lwall_1', x: 470, y: 398, w: 72, h: 14, mat: 'rock', type: 'low_wall', high: false, isCover: true },
+        { id: 'lwall_2', x: 728, y: 476, w: 78, h: 14, mat: 'rock', type: 'low_wall', high: false, isCover: true },
+
+        // --- УЩЕЛЬЕ КАНЬОНА (сдвинуто на восток под расширенный городок) ---
+        { id: 'cliff_n1', x: 960,  y: 0,   w: 180, h: 96,  mat: 'rock', type: 'cliff', high: true, isCover: true },
+        { id: 'cliff_n2', x: 1140, y: 0,   w: 210, h: 74,  mat: 'rock', type: 'cliff', high: true, isCover: true },
+        { id: 'cliff_n3', x: 1350, y: 0,   w: 250, h: 106, mat: 'rock', type: 'cliff', high: true, isCover: true },
+        { id: 'cliff_n4', x: 1600, y: 0,   w: 240, h: 88,  mat: 'rock', type: 'cliff', high: true, isCover: true },
+        { id: 'cliff_n5', x: 1840, y: 0,   w: 256, h: 74,  mat: 'rock', type: 'cliff', high: true, isCover: true },
+        { id: 'cliff_s1', x: 964,  y: height - 96,  w: 182, h: 96,  mat: 'rock', type: 'cliff', high: true, isCover: true },
+        { id: 'cliff_s2', x: 1146, y: height - 76,  w: 202, h: 76,  mat: 'rock', type: 'cliff', high: true, isCover: true },
+        { id: 'cliff_s3', x: 1348, y: height - 108, w: 234, h: 108, mat: 'rock', type: 'cliff', high: true, isCover: true },
+        { id: 'cliff_s4', x: 1582, y: height - 92,  w: 232, h: 92,  mat: 'rock', type: 'cliff', high: true, isCover: true },
+        { id: 'cliff_s5', x: 1814, y: height - 100, w: 246, h: 100, mat: 'rock', type: 'cliff', high: true, isCover: true },
         { id: 'cliff_e',  x: width - 44, y: 80, w: 44, h: height - 160, mat: 'rock', type: 'cliff', high: true, isCover: true, edgeEast: true },
 
-        // Валуны-укрытия в каньоне
-        { id: 'rock_1', x: 948,  y: 214, w: 46, h: 42, mat: 'rock', type: 'boulder', high: false, isCover: true },
-        { id: 'rock_2', x: 1084, y: 146, w: 44, h: 38, mat: 'rock', type: 'boulder', high: false, isCover: true },
-        { id: 'rock_3', x: 1108, y: 326, w: 54, h: 44, mat: 'rock', type: 'boulder', high: false, isCover: true },
-        { id: 'rock_4', x: 1266, y: 230, w: 42, h: 46, mat: 'rock', type: 'boulder', high: false, isCover: true },
-        { id: 'rock_5', x: 1204, y: 218, w: 46, h: 42, mat: 'rock', type: 'boulder', high: false, isCover: true },
-        { id: 'rock_6', x: 1324, y: 172, w: 44, h: 40, mat: 'rock', type: 'boulder', high: false, isCover: true },
-        { id: 'crate_7', x: 1010, y: 308, w: 34, h: 32, mat: 'wood', type: 'crate',   high: false, isCover: true },
-        { id: 'rock_8', x: 1500, y: 214, w: 46, h: 42, mat: 'rock', type: 'boulder', high: false, isCover: true },
-        { id: 'rock_9', x: 1662, y: 332, w: 50, h: 44, mat: 'rock', type: 'boulder', high: false, isCover: true },
-        { id: 'crate_11', x: 1580, y: 168, w: 34, h: 32, mat: 'wood', type: 'crate', high: false, isCover: true },
-        { id: 'wagon_4', x: 1720, y: 250, w: 60, h: 28, mat: 'wood', type: 'wagon', high: false, isCover: true },
-        { id: 'barrel_6', x: 1440, y: 400, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
-        { id: 'trough_2', x: 1758, y: 420, w: 54, h: 22, mat: 'water', type: 'trough', high: false, isCover: true },
-        { id: 'hay_4', x: 1618, y: 462, w: 32, h: 24, mat: 'hay', type: 'hay', high: false, isCover: true },
+        // Валуны и укрытия каньона
+        { id: 'rock_1', x: 1070, y: 214, w: 46, h: 42, mat: 'rock', type: 'boulder', high: false, isCover: true },
+        { id: 'rock_2', x: 1206, y: 146, w: 44, h: 38, mat: 'rock', type: 'boulder', high: false, isCover: true },
+        { id: 'rock_3', x: 1230, y: 326, w: 54, h: 44, mat: 'rock', type: 'boulder', high: false, isCover: true },
+        { id: 'rock_4', x: 1388, y: 230, w: 42, h: 46, mat: 'rock', type: 'boulder', high: false, isCover: true },
+        { id: 'rock_6', x: 1300, y: 172, w: 44, h: 40, mat: 'rock', type: 'boulder', high: false, isCover: true },
+        // Центральная каменная гряда делит ущелье на две линии обхода (фланговая тактика)
+        { id: 'rock_5',  x: 1490, y: 190, w: 46, h: 42, mat: 'rock', type: 'boulder', high: false, isCover: true },
+        { id: 'rock_10', x: 1502, y: 262, w: 48, h: 44, mat: 'rock', type: 'boulder', high: false, isCover: true },
+        { id: 'rock_11', x: 1492, y: 336, w: 46, h: 42, mat: 'rock', type: 'boulder', high: false, isCover: true },
+        { id: 'rock_12', x: 1504, y: 404, w: 44, h: 40, mat: 'rock', type: 'boulder', high: false, isCover: true },
+        { id: 'crate_7',  x: 1130, y: 308, w: 34, h: 32, mat: 'wood', type: 'crate', high: false, isCover: true },
+        { id: 'crate_11', x: 1700, y: 168, w: 34, h: 32, mat: 'wood', type: 'crate', high: false, isCover: true },
+        { id: 'wagon_4',  x: 1840, y: 250, w: 60, h: 28, mat: 'wood', type: 'wagon', high: false, isCover: true },
+        { id: 'barrel_6', x: 1560, y: 400, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
+        { id: 'trough_2', x: 1880, y: 420, w: 54, h: 22, mat: 'water', type: 'trough', high: false, isCover: true },
+        { id: 'hay_4',    x: 1740, y: 462, w: 32, h: 24, mat: 'hay', type: 'hay', high: false, isCover: true },
+        { id: 'lwall_3',  x: 1250, y: 470, w: 80, h: 14, mat: 'rock', type: 'low_wall', high: false, isCover: true },
+        { id: 'lwall_4',  x: 1650, y: 300, w: 76, h: 14, mat: 'rock', type: 'low_wall', high: false, isCover: true },
 
-        // --- ЮЖНЫЙ ДВОР / ЗАГОН (расширение карты вниз) ---
-        { id: 'fence_y1', x: 360, y: 540, w: 300, h: 12, mat: 'wood', type: 'fence', high: false, isCover: true },
-        { id: 'fence_y2', x: 360, y: 690, w: 120, h: 12, mat: 'wood', type: 'fence', high: false, isCover: true },
-        { id: 'fence_y7', x: 540, y: 690, w: 120, h: 12, mat: 'wood', type: 'fence', high: false, isCover: true },
-        { id: 'fence_y3', x: 360, y: 540, w: 12, h: 162, mat: 'wood', type: 'fence', high: false, isCover: true },
-        { id: 'fence_y4', x: 648, y: 540, w: 12, h: 162, mat: 'wood', type: 'fence', high: false, isCover: true },
-        { id: 'fence_y5', x: 1630, y: 556, w: 160, h: 12, mat: 'wood', type: 'fence', high: false, isCover: true },
-        { id: 'fence_y6', x: 880, y: 560, w: 12, h: 120, mat: 'wood', type: 'fence', high: false, isCover: true },
-        { id: 'hay_1', x: 430, y: 566, w: 36, h: 26, mat: 'hay', type: 'hay', high: false, isCover: true },
-        { id: 'hay_2', x: 478, y: 574, w: 30, h: 22, mat: 'hay', type: 'hay', high: false, isCover: true },
-        { id: 'hay_3', x: 1240, y: 592, w: 34, h: 26, mat: 'hay', type: 'hay', high: false, isCover: true },
-        { id: 'trough_1', x: 540, y: 622, w: 58, h: 22, mat: 'water', type: 'trough', high: false, isCover: true },
-        { id: 'crate_8', x: 596, y: 556, w: 32, h: 32, mat: 'wood', type: 'crate', high: false, isCover: true },
-        { id: 'crate_9', x: 700, y: 624, w: 30, h: 30, mat: 'wood', type: 'crate', high: false, isCover: true },
-        { id: 'crate_10', x: 1560, y: 620, w: 34, h: 32, mat: 'wood', type: 'crate', high: false, isCover: true },
-        { id: 'wagon_3', x: 962, y: 598, w: 62, h: 28, mat: 'wood', type: 'wagon', high: false, isCover: true },
-        { id: 'barrel_5', x: 1118, y: 660, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
-        { id: 'rock_7', x: 1458, y: 546, w: 46, h: 42, mat: 'rock', type: 'boulder', high: false, isCover: true }
+        // --- ЮЖНЫЙ ДВОР / ЗАГОН (под салуном) ---
+        { id: 'fence_y1', x: 56,  y: 596, w: 244, h: 12, mat: 'wood', type: 'fence', high: false, isCover: true },
+        { id: 'fence_y2', x: 56,  y: 736, w: 90,  h: 12, mat: 'wood', type: 'fence', high: false, isCover: true },
+        { id: 'fence_y7', x: 196, y: 736, w: 104, h: 12, mat: 'wood', type: 'fence', high: false, isCover: true },
+        { id: 'fence_y3', x: 56,  y: 596, w: 12,  h: 152, mat: 'wood', type: 'fence', high: false, isCover: true },
+        { id: 'fence_y4', x: 300, y: 596, w: 12,  h: 152, mat: 'wood', type: 'fence', high: false, isCover: true },
+        { id: 'hay_1',    x: 96,  y: 626, w: 36, h: 26, mat: 'hay', type: 'hay', high: false, isCover: true },
+        { id: 'hay_2',    x: 150, y: 634, w: 30, h: 22, mat: 'hay', type: 'hay', high: false, isCover: true },
+        { id: 'trough_1', x: 210, y: 690, w: 58, h: 22, mat: 'water', type: 'trough', high: false, isCover: true },
+        { id: 'crate_8',  x: 262, y: 626, w: 32, h: 32, mat: 'wood', type: 'crate', high: false, isCover: true },
+        { id: 'lwall_5',  x: 90,  y: 700, w: 76, h: 14, mat: 'rock', type: 'low_wall', high: false, isCover: true },
+
+        // Южная полоса за домами (обход с фланга)
+        { id: 'hay_3',    x: 400, y: 700, w: 34, h: 26, mat: 'hay', type: 'hay', high: false, isCover: true },
+        { id: 'crate_9',  x: 460, y: 724, w: 30, h: 30, mat: 'wood', type: 'crate', high: false, isCover: true },
+        { id: 'fence_y5', x: 520, y: 706, w: 160, h: 12, mat: 'wood', type: 'fence', high: false, isCover: true },
+        { id: 'crate_10', x: 720, y: 700, w: 34, h: 32, mat: 'wood', type: 'crate', high: false, isCover: true },
+        { id: 'wagon_3',  x: 780, y: 728, w: 62, h: 28, mat: 'wood', type: 'wagon', high: false, isCover: true },
+        { id: 'barrel_5', x: 858, y: 690, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true }
       ];
 
       // Телеграфные столбы с проводами вдоль улицы (референсы 1 и 2)
       const poles = [
-        { x: 406, y: 118 },
-        { x: 572, y: 114 },
-        { x: 742, y: 116 },
-        { x: 874, y: 106 }
+        { x: 406, y: 118 + STREET_SHIFT },
+        { x: 600, y: 114 + STREET_SHIFT },
+        { x: 780, y: 116 + STREET_SHIFT },
+        { x: 930, y: 106 + STREET_SHIFT }
       ];
 
       // Оливковые деревья на окраине городка (референс 3)
       const trees = [
-        { x: 576, y: 36, r: 18 },
-        { x: 564, y: 456, r: 22 },
-        { x: 834, y: 406, r: 26 },
-        { x: 1352, y: 498, r: 22 },
-        { x: 764, y: 724, r: 20 },
-        { x: 1806, y: 646, r: 24 }
+        { x: 620, y: 206, r: 18 },
+        { x: 900, y: 500, r: 22 },
+        { x: 946, y: 420, r: 26 },
+        { x: 1560, y: 560, r: 22 },
+        { x: 300, y: 760, r: 20 },
+        { x: 2100, y: 620, r: 24 }
       ];
 
       bakeSolidSprites(solids, trees);
@@ -1741,18 +1810,19 @@
         const segs = rectToSegments(s);
         segs.forEach((seg) => {
           wallSegments.push(seg);
-          // Поднятие оружия работает у ЛЮБЫХ препятствий (стены, ящики, бочки, столбы, заборы)
+          // Ствол поднимается у ЛЮБОГО препятствия — сегменты всех solids
           raiseSegments.push(seg);
+          barrelSegments.push(seg);
+          // Акустика отражается только от высоких преград
           if (s.high) {
-            barrelSegments.push(seg);
             soundSegments.push(seg);
           }
         });
       });
 
       const doors = [
-        { hingeX: 332, hingeY: 217, len: 36, baseAngle: Math.PI / 2,  angle: 0, vel: 0 },
-        { hingeX: 332, hingeY: 293, len: 36, baseAngle: -Math.PI / 2, angle: 0, vel: 0 }
+        { hingeX: 332, hingeY: 217 + STREET_SHIFT, len: 36, baseAngle: Math.PI / 2,  angle: 0, vel: 0 },
+        { hingeX: 332, hingeY: 293 + STREET_SHIFT, len: 36, baseAngle: -Math.PI / 2, angle: 0, vel: 0 }
       ];
 
       const world = {
@@ -1768,8 +1838,9 @@
         raiseSegments,
         soundSegments,
         doors,
-        // Интерьер салуна (для клипа облачных теней и логики дневного света)
-        saloon: { x: 24, y: 70, w: 316, h: 380 },
+        // Интерьер салуна (для клипа облачных теней, дневного света и логики зон)
+        saloon: { x: SALOON.x, y: SALOON.y, w: SALOON.w, h: SALOON.h },
+        streetShift: STREET_SHIFT,
         spawnTimer: 0,
         targets: createInitialTargets(width, height, solids),
         bgCanvas: bakeBackground(width, height),
@@ -1777,9 +1848,10 @@
         // Рандомная точка появления бота: внутри игровых зон, без пересечения с препятствиями
         pickSpawnPoint(player, nearX, nearY) {
           const zones = [
-            { x1: 352, y1: 132, x2: 820, y2: 388 },                 // узкая улочка
-            { x1: 862, y1: 120, x2: width - 90, y2: 396 },          // каньон (запад и восток)
-            { x1: 368, y1: 512, x2: width - 100, y2: height - 120 } // южный двор-загон
+            { x1: 352, y1: 242, x2: 940, y2: 496 },                    // главная улица
+            { x1: 980, y1: 120, x2: width - 110, y2: 660 },            // каньон (две линии обхода)
+            { x1: 50,  y1: 600, x2: 320, y2: height - 40 },            // южный двор-загон
+            { x1: 360, y1: height - 96, x2: 920, y2: height - 24 }     // южная полоса за домами
           ];
           for (let attempt = 0; attempt < 34; attempt++) {
             const z = zones[Math.floor(Math.random() * zones.length)];
@@ -1822,21 +1894,21 @@
         },
 
         getZoneAt(x, y) {
-          if (x < 336 && y > 70 && y < 450) {
+          if (x < SALOON.x + SALOON.w && y > SALOON.y && y < SALOON.y + SALOON.h) {
             return { id: 'saloon', label: 'САЛУН' };
           }
-          if (x >= 855) {
-            return { id: 'canyon', label: y > 470 ? 'ЮЖНЫЙ КАНЬОН' : 'УЩЕЛЬЕ КАНЬОНА' };
+          if (x >= 960) {
+            return { id: 'canyon', label: y > 520 ? 'ЮЖНЫЙ КАНЬОН' : 'УЩЕЛЬЕ КАНЬОНА' };
           }
-          if (y > 470) {
+          if (y > 560) {
             return { id: 'yard', label: 'ДВОР И ЗАГОН' };
           }
-          return { id: 'alley', label: 'УЗКАЯ УЛОЧКА' };
+          return { id: 'alley', label: 'ГЛАВНАЯ УЛИЦА' };
         },
 
         getSurfaceAt(x, y) {
-          if (x < 344 && y > 72 && y < 448) return 'wood';
-          if (x >= 340 && x <= 824 && ((y >= 102 && y <= 124) || (y >= 392 && y <= 414))) {
+          if (x < SALOON.x + SALOON.w + 4 && y > SALOON.y + 2 && y < SALOON.y + 378) return 'wood';
+          if (x >= 340 && x <= 845 && ((y >= STREET_TOP && y <= STREET_TOP + 22) || (y >= STREET_BOT && y <= STREET_BOT + 22))) {
             return 'wood';
           }
           return 'dirt';

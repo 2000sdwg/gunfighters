@@ -69,10 +69,10 @@
     focusSpeed: 58,
     reloadSpeed: 52,
 
-    // Короткий тактический перекат (~31 px)
-    rollDur: 0.28,
-    rollSpeed: 112,
-    rollCooldown: 0.50,
+    // Быстрый тактический перекат (~41 px) — резкий и отзывчивый темп
+    rollDur: 0.24,
+    rollSpeed: 170,
+    rollCooldown: 0.45,
     rollEndSpread: 0.11,
 
     // Укрытия
@@ -405,7 +405,7 @@
       },
       player: {
         x: 150,
-        y: 250,
+        y: 360,
         hp: 100,
         maxHp: 100,
         hurtTimer: 0,
@@ -436,6 +436,7 @@
         peeking: false,
         peekFrac: 0,
         peekSide: 1,
+        coverFrac: 0,
         coverObj: null,
         coverNormalX: 0,
         coverNormalY: 0,

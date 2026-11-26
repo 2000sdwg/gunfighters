@@ -135,6 +135,69 @@
     });
   }
 
+  // Пересекает ли отрезок прямоугольник (Liang–Barsky, без аллокаций)
+  function segmentCrossesRect(x1, y1, x2, y2, r) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    let t0 = 0;
+    let t1 = 1;
+
+    if (Math.abs(dx) < 1e-9) {
+      if (x1 < r.x || x1 > r.x + r.w) return false;
+    } else {
+      let ta = (r.x - x1) / dx;
+      let tb = (r.x + r.w - x1) / dx;
+      if (ta > tb) { const tmp = ta; ta = tb; tb = tmp; }
+      if (ta > t0) t0 = ta;
+      if (tb < t1) t1 = tb;
+      if (t0 > t1) return false;
+    }
+
+    if (Math.abs(dy) < 1e-9) {
+      if (y1 < r.y || y1 > r.y + r.h) return false;
+    } else {
+      let ta = (r.y - y1) / dy;
+      let tb = (r.y + r.h - y1) / dy;
+      if (ta > tb) { const tmp = ta; ta = tb; tb = tmp; }
+      if (ta > t0) t0 = ta;
+      if (tb < t1) t1 = tb;
+      if (t0 > t1) return false;
+    }
+
+    return true;
+  }
+
+  // Частицы попадания в материал укрытия (щепки, брызги, искры, сено)
+  function spawnCoverImpact(state, x, y, mat, dirAngle) {
+    const P = getPal();
+    let colors;
+    let kind = 'debris';
+    if (mat === 'water') {
+      colors = [P.water[0], P.water[1], P.cloud[0]];
+    } else if (mat === 'rock' || mat === 'stone') {
+      colors = [P.stone[0], P.stone[1], P.stone[2]];
+      kind = 'spark';
+    } else if (mat === 'hay') {
+      colors = [P.grass[0], P.grass[1], P.grass[2]];
+    } else {
+      colors = [P.woodWarm[1], P.woodWarm[2], P.woodWarm[3]];
+    }
+    spawnParticles(state, x, y, 7, {
+      baseAngle: dirAngle,
+      spread: 0.9,
+      minSpeed: 26,
+      maxSpeed: 88,
+      minLife: 0.16,
+      maxLife: 0.36,
+      minSize: 1.2,
+      maxSize: 2.4,
+      drag: 6.5,
+      colors: colors,
+      alpha: 0.9,
+      kind: kind
+    });
+  }
+
   function checkBarrelWallCollision(player, weapon, world) {
     const pos = getRenderPos(player);
     const a = player.aimAngle;
@@ -145,8 +208,10 @@
 
     // Ствол поднимается у ЛЮБЫХ препятствий: стены, ящики, бочки, столбы, заборы, столы
     const segments = world.raiseSegments || world.barrelSegments;
-    // Своё укрытие не блокирует выстрел, пока герой из-за него выглядывает
-    const ignoreId = (player.inCover && player.coverObj) ? player.coverObj.id : null;
+    // Своё НИЗКОЕ укрытие игнорируется только когда герой из-за него выглядывает
+    const ignoreId = (player.inCover && player.peeking && player.coverObj && !player.coverObj.high)
+      ? player.coverObj.id
+      : null;
 
     const maxCheck = weapon.wallCheckLen + 5;
     const origins = [
@@ -375,6 +440,31 @@
     p.coverObj = null;
     p.coverAnchorX = undefined;
     p.coverAnchorY = undefined;
+  }
+
+  // Чистый респавн в салуне (по таймеру или мгновенно по [R])
+  function respawnPlayer(state) {
+    const p = state.player;
+    p.dead = false;
+    p.hp = p.maxHp || 100;
+    p.x = 150;
+    p.y = 360;
+    p.vx = 0;
+    p.vy = 0;
+    p.rolling = false;
+    p.rollTimer = 0;
+    p.inCover = false;
+    p.peeking = false;
+    p.coverObj = null;
+    p.coverAnchorX = undefined;
+    p.coverAnchorY = undefined;
+    p.coverFrac = 0;
+    p.peekFrac = 0;
+    p.hurtTimer = 0;
+    p.spread = 0.05;
+    p.bloom = 0;
+    p.regenTimer = 0;
+    showToast(state, 'ВОЗРОЖДЕНИЕ В САЛУНЕ', 1.6);
   }
 
   function startRoll(state, world) {
@@ -838,6 +928,11 @@
     if (code === 'Digit3') { switchWeapon(state, 2); return; }
 
     if (code === 'KeyR') {
+      // Мгновенный респавн по [R], если игрок погиб
+      if (state.player.dead) {
+        respawnPlayer(state);
+        return;
+      }
       openReload(state, world);
       return;
     }
@@ -1030,6 +1125,9 @@
 
       for (let sIdx = 0; sIdx < world.wallSegments.length; sIdx++) {
         const seg = world.wallSegments[sIdx];
+        // Низкие препятствия (ящики, бочки, столы, заборы, сено, корыта, валуны, стойка)
+        // простреливаются — пулю останавливают только высокие преграды
+        if (!seg.high) continue;
         if (b.ignoreId && seg.id === b.ignoreId) continue;
         const h = G.MATH.raySegment(b.x, b.y, b.dx, b.dy, bestDist, seg.x1, seg.y1, seg.x2, seg.y2);
         if (h) {
@@ -1048,7 +1146,10 @@
           const rad = G.CFG.playerRadius + 2;
           if (perp2 <= rad * rad) {
             bestDist = proj;
-            const protectedByCover = p.inCover && !p.peeking;
+            // Пригнувшийся за НИЗКИМ укрытием игрок защищён только если пуля
+            // действительно проходит сквозь это укрытие (фланговый огонь пробивает)
+            const protectedByCover = p.inCover && !p.peeking && p.coverObj && !p.coverObj.high
+              && segmentCrossesRect(b.x, b.y, p.x, p.y, p.coverObj);
             const rolling = p.rolling;
             if (!rolling && !protectedByCover) {
               const dmg = b.damage || 20;
@@ -1062,19 +1163,15 @@
               state.bullets.splice(i, 1);
               continue;
             } else if (protectedByCover) {
-              G.AUDIO.playImpact('wood');
-              spawnParticles(state, b.x + b.dx * proj, b.y + b.dy * proj, 6, {
-                baseAngle: Math.atan2(-b.dy, -b.dx),
-                spread: 0.8,
-                minSpeed: 30,
-                maxSpeed: 80,
-                minLife: 0.15,
-                maxLife: 0.35,
-                minSize: 1.2,
-                maxSize: 2.2,
-                colors: [P.woodWarm[1], P.woodWarm[2]],
-                kind: 'debris'
-              });
+              // Пуля вгрызается в материал укрытия
+              const mat = p.coverObj.mat || 'wood';
+              const ix = b.x + b.dx * proj;
+              const iy = b.y + b.dy * proj;
+              G.AUDIO.playImpact(mat === 'hay' ? 'wood' : mat);
+              spawnCoverImpact(state, ix, iy, mat, Math.atan2(-b.dy, -b.dx));
+              if (mat === 'water') {
+                addWaterRipple(state, p.coverObj.id, ix, iy, 9, 0.6);
+              }
               state.bullets.splice(i, 1);
               continue;
             }
@@ -1560,26 +1657,13 @@
       }
       if (p.hp <= 0 && !p.dead) {
         p.dead = true;
-        p.respawnTimer = 2.5;
-        showToast(state, 'ВЫ ПОГИБЛИ...', 2.2);
+        p.respawnTimer = 2.0;
+        showToast(state, 'ВЫ ПОГИБЛИ... [R] — ВОЗРОДИТЬСЯ', 2.2);
       }
       if (p.dead) {
         p.respawnTimer -= dt;
         if (p.respawnTimer <= 0) {
-          p.dead = false;
-          p.hp = p.maxHp || 100;
-          p.x = 180;
-          p.y = 250;
-          p.vx = 0;
-          p.vy = 0;
-          // Сбрасываем состояние укрытия, иначе герой «подтянется» к старому укрытию
-          p.inCover = false;
-          p.peeking = false;
-          p.coverObj = null;
-          p.coverAnchorX = undefined;
-          p.coverAnchorY = undefined;
-          p.peekFrac = 0;
-          showToast(state, 'ВОЗРОЖДЕНИЕ В САЛУНЕ', 1.8);
+          respawnPlayer(state);
         }
       }
 
@@ -1671,10 +1755,15 @@
           p.peekDirX /= len;
           p.peekDirY /= len;
 
-          // Ближайший к цели край укрытия: короткий пиксельный «шаг» вбок + вынос из-за кромки
+          // Ближайший к цели край укрытия
           const edge = G.CFG.playerRadius + 4;
           const lateral = Math.min(16, Math.max(6, Math.min(c.w, c.h) * 0.5));
-          if (Math.abs(p.coverNormalX) >= Math.abs(p.coverNormalY)) {
+          if (!c.high) {
+            // НИЗКОЕ укрытие: не смещаемся к углу — встаём на месте вдоль контура
+            // и чуть подаём корпус к кромке в сторону прицела
+            p.peekTargetX = p.coverAnchorX + p.coverNormalX * 2.5;
+            p.peekTargetY = p.coverAnchorY + p.coverNormalY * 2.5;
+          } else if (Math.abs(p.coverNormalX) >= Math.abs(p.coverNormalY)) {
             p.peekTargetX = (p.coverNormalX > 0 ? c.x + c.w : c.x) + p.coverNormalX * edge;
             p.peekTargetY = G.MATH.clamp(
               p.coverAnchorY + ty * side * lateral,
@@ -1696,7 +1785,22 @@
         }
 
         if (moveX !== 0 || moveY !== 0) {
-          exitCover(state);
+          // Плавное смещение вдоль кромки укрытия; уход «от» укрытия — только при явном шаге назад
+          const perp = moveX * p.coverNormalX + moveY * p.coverNormalY;
+          const tx2 = -p.coverNormalY;
+          const ty2 = p.coverNormalX;
+          const along = moveX * tx2 + moveY * ty2;
+          if (perp > 0.55) {
+            exitCover(state);
+          } else if (Math.abs(along) > 0.05 && p.coverObj) {
+            const c = p.coverObj;
+            const slide = along * G.CFG.focusSpeed * dt * 0.9;
+            if (Math.abs(tx2) > 0.5) {
+              p.coverAnchorX = G.MATH.clamp(p.coverAnchorX + tx2 * slide, c.x + 6, c.x + c.w - 6);
+            } else {
+              p.coverAnchorY = G.MATH.clamp(p.coverAnchorY + ty2 * slide, c.y + 6, c.y + c.h - 6);
+            }
+          }
         }
       } else {
         const focus = input.rmb && !ws.reloading;
@@ -1718,6 +1822,10 @@
 
       const targetPeek = (p.inCover && p.peeking) ? 1 : 0;
       p.peekFrac = G.MATH.lerp(p.peekFrac || 0, targetPeek, Math.min(1, dt * 15));
+
+      // Плавный вход/выход из позы «за укрытием»
+      const targetCover = p.inCover ? 1 : 0;
+      p.coverFrac = G.MATH.lerp(p.coverFrac || 0, targetCover, Math.min(1, dt * 12));
 
       p.x = G.MATH.clamp(p.x, 30, world.width - 30);
       p.y = G.MATH.clamp(p.y, 20, world.height - 20);
