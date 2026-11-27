@@ -63,6 +63,40 @@
     outline:    '#140f0c'                                                // единый тёмно-умбровый контур
   };
 
+  // Профили сложности AI бандитов
+  G.BOT_DIFFICULTY = {
+    easy: {
+      id: 'easy',
+      label: 'Лёгкий',
+      reactMult: 1.45,
+      dodgeSkill: 0.25,
+      spreadMult: 1.55,
+      tacticalCover: 0.35,
+      avoidFriendlyFire: false,
+      shootCooldownMult: 1.35
+    },
+    medium: {
+      id: 'medium',
+      label: 'Средний',
+      reactMult: 1.0,
+      dodgeSkill: 0.65,
+      spreadMult: 1.0,
+      tacticalCover: 0.78,
+      avoidFriendlyFire: 0.55,
+      shootCooldownMult: 1.0
+    },
+    hard: {
+      id: 'hard',
+      label: 'Тяжёлый',
+      reactMult: 0.72,
+      dodgeSkill: 1.0,
+      spreadMult: 0.75,
+      tacticalCover: 1.0,
+      avoidFriendlyFire: true,
+      shootCooldownMult: 0.85
+    }
+  };
+
   G.CFG = {
     // Внутреннее пиксельное разрешение (низкорезный буфер для честного пиксель-арта без мыла)
     zoom: 2.0,
@@ -72,7 +106,8 @@
     playerMaxHp: 100,
     spawnBandits: true,
 
-    // Боты: меткость 0..1, лимит живых врагов, интервал спавна и пауза
+    // Боты: сложность, меткость 0..1, лимит живых врагов, интервал спавна и пауза
+    botDifficulty: 'hard',
     botAccuracy: 0.55,
     pauseSpawn: false,
     botMaxAlive: 5,
@@ -134,11 +169,19 @@
 
   // ==================== СОХРАНЕНИЕ ИГРОВЫХ НАСТРОЕК (МЕТКОСТЬ БОТОВ / СПАВН / ФИЗИКА) ====================
 
+  G.getBotDiffProfile = function () {
+    const key = G.CFG.botDifficulty || 'hard';
+    return (G.BOT_DIFFICULTY && G.BOT_DIFFICULTY[key]) || G.BOT_DIFFICULTY.medium;
+  };
+
   G.loadSettings = function () {
     try {
       const raw = localStorage.getItem(SETTINGS_KEY);
       if (!raw) return;
       const s = JSON.parse(raw);
+      if (typeof s.botDifficulty === 'string' && G.BOT_DIFFICULTY && G.BOT_DIFFICULTY[s.botDifficulty]) {
+        G.CFG.botDifficulty = s.botDifficulty;
+      }
       if (typeof s.botAccuracy === 'number') {
         G.CFG.botAccuracy = G.MATH.clamp(s.botAccuracy, 0, 1);
       }
@@ -164,6 +207,7 @@
   G.saveSettings = function () {
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+        botDifficulty: G.CFG.botDifficulty || 'hard',
         botAccuracy: G.CFG.botAccuracy,
         botMaxAlive: G.CFG.botMaxAlive,
         botSpawnInterval: G.CFG.botSpawnInterval,
@@ -428,12 +472,26 @@
     },
     raycastSegments(ox, oy, dx, dy, maxDist, segments) {
       let best = null;
+      let curMax = maxDist;
+      let rMinX = ox;
+      let rMaxX = ox;
+      let rMinY = oy;
+      let rMaxY = oy;
+      const ex = ox + dx * maxDist;
+      const ey = oy + dy * maxDist;
+      if (ex < rMinX) rMinX = ex; else rMaxX = ex;
+      if (ey < rMinY) rMinY = ey; else rMaxY = ey;
+
       for (let i = 0; i < segments.length; i++) {
         const s = segments[i];
-        const hit = G.MATH.raySegment(ox, oy, dx, dy, best ? best.dist : maxDist, s.x1, s.y1, s.x2, s.y2);
+        if (s.maxX !== undefined && (s.maxX < rMinX || s.minX > rMaxX || s.maxY < rMinY || s.minY > rMaxY)) {
+          continue;
+        }
+        const hit = G.MATH.raySegment(ox, oy, dx, dy, curMax, s.x1, s.y1, s.x2, s.y2);
         if (hit) {
           hit.seg = s;
           best = hit;
+          curMax = hit.dist;
         }
       }
       return best;
@@ -481,8 +539,9 @@
   G.createPlayerState = function (id, x, y, opts) {
     opts = opts || {};
     const pid = id || 'local';
-    const px = x !== undefined ? x : 150;
-    const py = y !== undefined ? y : 360;
+    const defSp = (G.WORLD_LAYOUT && G.WORLD_LAYOUT.playerSpawn) || { x: 215, y: 400 };
+    const px = x !== undefined ? x : defSp.x;
+    const py = y !== undefined ? y : defSp.y;
     return {
       id: pid,
       name: (opts.name || G.CFG.playerName || 'СТРЕЛОК').slice(0, 18),
@@ -521,6 +580,11 @@
       rollCooldown: 0,
       rollDx: 0,
       rollDy: 0,
+      stunTimer: 0,
+      mountedHorse: false,
+      knockVx: 0,
+      knockVy: 0,
+      doorHitCd: 0,
 
       inCover: false,
       peeking: false,
@@ -569,15 +633,38 @@
     };
   };
 
+  G.syncPlayersCache = function (state) {
+    if (!state) return [];
+    if (!state._playersArr) state._playersArr = [];
+    const arr = state._playersArr;
+    arr.length = 0;
+    if (state.players) {
+      for (const k in state.players) {
+        const pl = state.players[k];
+        if (pl) arr.push(pl);
+      }
+    } else if (state.player) {
+      arr.push(state.player);
+    }
+    return arr;
+  };
+
   G.getPlayersList = function (state) {
     if (!state) return [];
-    if (state.players) return Object.values(state.players);
-    return state.player ? [state.player] : [];
+    if (state._playersArr && state.players) {
+      let cnt = 0;
+      for (const k in state.players) {
+        if (state.players[k]) cnt++;
+      }
+      if (cnt === state._playersArr.length) return state._playersArr;
+    }
+    return G.syncPlayersCache(state);
   };
 
   G.createInitialState = function () {
     const localId = 'local';
-    const localPlayer = G.createPlayerState(localId, 150, 360, {
+    const defSp = (G.WORLD_LAYOUT && G.WORLD_LAYOUT.playerSpawn) || { x: 215, y: 400 };
+    const localPlayer = G.createPlayerState(localId, defSp.x, defSp.y, {
       isLocal: true,
       name: G.CFG.playerName || 'СТРЕЛОК',
       hatId: G.CFG.selectedHat || 'classic'
@@ -592,6 +679,7 @@
       players: {
         [localId]: localPlayer
       },
+      _playersArr: [localPlayer],
       mpMode: 'coop', // 'coop' | 'pvp'
       friendlyFire: false,
       netRole: 'offline', // 'offline' | 'host' | 'client'
@@ -599,15 +687,15 @@
         keys: {},
         mouseX: 0,
         mouseY: 0,
-        worldMouseX: 200,
-        worldMouseY: 200,
+        worldMouseX: defSp.x + 60,
+        worldMouseY: defSp.y,
         lmb: false,
         rmb: false,
         rebindingAction: null
       },
       camera: {
-        x: 150,
-        y: 250,
+        x: defSp.x,
+        y: defSp.y,
         shakeX: 0,
         shakeY: 0,
         shakeMag: 0

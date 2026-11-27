@@ -200,7 +200,8 @@
       st.netRole = 'offline';
       st.mpMode = 'coop';
       st.friendlyFire = false;
-      const keep = (st.players && st.players[st.localPlayerId]) || st.player || G.createPlayerState('local', 150, 360, { isLocal: true });
+      const defSp = (G.WORLD_LAYOUT && G.WORLD_LAYOUT.playerSpawn) || { x: 215, y: 400 };
+      const keep = (st.players && st.players[st.localPlayerId]) || st.player || G.createPlayerState('local', defSp.x, defSp.y, { isLocal: true });
       keep.id = 'local';
       keep.isLocal = true;
       keep.name = (G.CFG.playerName || keep.name || 'СТРЕЛОК').slice(0, 18);
@@ -210,6 +211,7 @@
       keep.bandanaColor = null;
       st.localPlayerId = 'local';
       st.players = { local: keep };
+      if (G.syncPlayersCache) G.syncPlayersCache(st);
       if (!silent && G.SIM && G.SIM.showToast) {
         G.SIM.showToast(st, 'ОТКЛЮЧЕНО ОТ СЕТИ', 1.2);
       }
@@ -318,6 +320,8 @@
         crit: p.critical ? 1 : 0,
         bld: p.bleeding ? 1 : 0,
         con: r2(p.concussion || 0),
+        st: r2(p.stunTimer || 0),
+        mh: p.mountedHorse ? 1 : 0,
         smk: p.smokingState ? { phase: p.smokingState.phase, timer: r2(p.smokingState.timer) } : null,
         kl: p.kills || 0,
         dt: p.deaths || 0,
@@ -363,6 +367,9 @@
           ct: t.coatTrim,
           bn: t.bandana,
           gt: t.gunType || 'revolver',
+          wi: t.weaponId || 'walker',
+          st: r2(t.stunTimer || 0),
+          rl: t.reloading ? 1 : 0,
           ai: t.aiState || 'patrol'
         });
       } else {
@@ -427,6 +434,23 @@
     const wv = state.waves || {};
     const ds = state.dustStorm || {};
     const events = state.netEvents ? state.netEvents.splice(0, state.netEvents.length) : [];
+    const hrSrc = world && world.horse;
+    const hrSnap = hrSrc ? {
+      x: r1(hrSrc.x),
+      y: r1(hrSrc.y),
+      vx: r1(hrSrc.vx || 0),
+      vy: r1(hrSrc.vy || 0),
+      spd: r1(hrSrc.speed || 0),
+      a: r3(hrSrc.angle || 0),
+      hp: r1(hrSrc.hp || 0),
+      clm: r1(hrSrc.calm !== undefined ? hrSrc.calm : 100),
+      st: hrSrc.state || 'tied',
+      td: hrSrc.tied ? 1 : 0,
+      rid: hrSrc.riderId || null,
+      bk: r2(hrSrc.buckTimer || 0),
+      gp: r2(hrSrc.gallopPhase || 0),
+      hf: r2(hrSrc.hitFlash || 0)
+    } : null;
 
     return {
       t: 'snap',
@@ -442,6 +466,7 @@
       sd: solidsDmg,
       pd: puddles,
       dr: doors,
+      hr: hrSnap,
       bl: bullets,
       ev: events
     };
@@ -456,7 +481,8 @@
     }
     const pid = 'p_' + (session.playerSeq++);
     const pal = COWBOY_PALETTES[(session.paletteSeq++) % COWBOY_PALETTES.length];
-    const pl = G.createPlayerState(pid, 175, 360, {
+    const defSp = (G.WORLD_LAYOUT && G.WORLD_LAYOUT.playerSpawn) || { x: 215, y: 400 };
+    const pl = G.createPlayerState(pid, defSp.x, defSp.y, {
       isLocal: false,
       name: name || ('КОВБОЙ ' + pid.slice(2)),
       hatId: hatId || 'classic',
@@ -465,6 +491,7 @@
       bandanaColor: pal.bandanaColor
     });
     state.players[pid] = pl;
+    if (G.syncPlayersCache) G.syncPlayersCache(state);
     if (G.SIM && G.SIM.pickSpawnForPlayer) {
       const sp = G.SIM.pickSpawnForPlayer(state, world, pl);
       if (sp) {
@@ -642,6 +669,10 @@
         if (lp && ev.playerId === lp.id && G.AUDIO && G.AUDIO.playDryClick) G.AUDIO.playDryClick();
       } else if (ev.kind === 'cock') {
         if (lp && ev.playerId === lp.id && G.AUDIO && G.AUDIO.playCock) G.AUDIO.playCock(ev.action || 'sa');
+      } else if (ev.kind === 'door_slam') {
+        if (G.AUDIO && G.AUDIO.playDoorSlam) G.AUDIO.playDoorSlam();
+      } else if (ev.kind === 'birds') {
+        if (world && world.flushBirdFlocksNear) world.flushBirdFlocksNear(ev.x, ev.y, ev.r || 300, state);
       }
     }
   }
@@ -747,6 +778,8 @@
         pl.critical = !!ps.crit;
         pl.bleeding = !!ps.bld;
         pl.concussion = ps.con || 0;
+        pl.stunTimer = ps.st || 0;
+        pl.mountedHorse = !!ps.mh;
         pl.smokingState = ps.smk || null;
         pl.kills = ps.kl || 0;
         pl.deaths = ps.dt || 0;
@@ -759,6 +792,7 @@
           delete state.players[pid];
         }
       });
+      if (G.syncPlayersCache) G.syncPlayersCache(state);
     }
 
     // 2. Синхронизация целей и бандитов
@@ -812,6 +846,9 @@
           t.coatTrim = es.ct || t.coatTrim;
           t.bandana = es.bn || t.bandana;
           t.gunType = es.gt || t.gunType;
+          t.weaponId = es.wi || t.weaponId;
+          t.stunTimer = es.st || 0;
+          t.reloading = !!es.rl;
           t.aiState = es.ai || t.aiState;
           nextTargets.push(t);
         } else if (t) {
@@ -869,6 +906,34 @@
       }
     }
 
+    // 5b. Лошадь
+    if (world && world.horse && snap.hr) {
+      const hr = world.horse;
+      const hs = snap.hr;
+      const jDist = Math.hypot(hs.x - hr.x, hs.y - hr.y);
+      hr._netPrevX = jDist > 120 ? hs.x : hr.x;
+      hr._netPrevY = jDist > 120 ? hs.y : hr.y;
+      hr._netPrevA = hr.angle || 0;
+      if (jDist > 120) {
+        hr.x = hs.x;
+        hr.y = hs.y;
+      }
+      hr._netNextX = hs.x;
+      hr._netNextY = hs.y;
+      hr._netNextA = hs.a || 0;
+      hr.vx = hs.vx || 0;
+      hr.vy = hs.vy || 0;
+      hr.speed = hs.spd || 0;
+      hr.hp = hs.hp;
+      hr.calm = hs.clm !== undefined ? hs.clm : hr.calm;
+      hr.state = hs.st || hr.state;
+      hr.tied = !!hs.td;
+      hr.riderId = hs.rid || null;
+      hr.buckTimer = hs.bk || 0;
+      hr.gallopPhase = hs.gp || hr.gallopPhase;
+      hr.hitFlash = hs.hf || 0;
+    }
+
     // 6. Летящие пули
     if (Array.isArray(snap.bl)) {
       state.bullets = snap.bl.map((b) => ({
@@ -901,12 +966,14 @@
         G.SIM.toggleEditorMode(state, world, false);
       }
 
-      const lp = G.createPlayerState(msg.yourId, 160, 360, {
+      const defSp = (G.WORLD_LAYOUT && G.WORLD_LAYOUT.playerSpawn) || { x: 215, y: 400 };
+      const lp = G.createPlayerState(msg.yourId, defSp.x, defSp.y, {
         isLocal: true,
         name: keepName,
         hatId: keepHat
       });
       state.players = { [msg.yourId]: lp };
+      if (G.syncPlayersCache) G.syncPlayersCache(state);
 
       if (world && world.applyNetworkSolids && Array.isArray(msg.solids)) {
         world.applyNetworkSolids(msg.solids, state);
@@ -1011,6 +1078,18 @@
         const d = world.doors[i];
         if (d._netNextA !== undefined && d._netPrevA !== undefined) {
           d.angle = d._netPrevA + (d._netNextA - d._netPrevA) * t;
+        }
+      }
+    }
+
+    if (world && world.horse) {
+      const hr = world.horse;
+      if (hr._netNextX !== undefined && hr._netPrevX !== undefined) {
+        const t = Math.min(1, alpha);
+        hr.x = hr._netPrevX + (hr._netNextX - hr._netPrevX) * t;
+        hr.y = hr._netPrevY + (hr._netNextY - hr._netPrevY) * t;
+        if (hr._netNextA !== undefined && hr._netPrevA !== undefined) {
+          hr.angle = lerpAngle(hr._netPrevA, hr._netNextA, t);
         }
       }
     }
@@ -1138,6 +1217,7 @@
     if (entry.playerId && state && state.players && state.players[entry.playerId]) {
       const pname = state.players[entry.playerId].name || entry.name || 'ИГРОК';
       delete state.players[entry.playerId];
+      if (G.syncPlayersCache) G.syncPlayersCache(state);
       if (G.SIM && G.SIM.showToast) G.SIM.showToast(state, `${pname} ВЫШЕЛ`, 1.4);
     }
     delete session.peers[peerKey];

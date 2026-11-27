@@ -90,6 +90,14 @@
       </label>
 
       <div class="section-title">БОТЫ</div>
+      <div class="bind-row">
+        <span>Сложность AI</span>
+        <div class="diff-group">
+          <button id="btn-diff-easy" class="btn-small" data-diff="easy">Лёгкий</button>
+          <button id="btn-diff-medium" class="btn-small" data-diff="medium">Средний</button>
+          <button id="btn-diff-hard" class="btn-small active" data-diff="hard">Тяжёлый</button>
+        </div>
+      </div>
       <label class="slider-row">
         <span>Меткость ботов</span>
         <input type="range" id="sl-accuracy" min="0" max="1" step="0.05" value="0.55" />
@@ -137,6 +145,7 @@
         <button id="btn-toggle-rays" class="btn-small">Лучи (V): ВЫКЛ</button>
         <button id="btn-toggle-bandits" class="btn-small">Бандиты: ВКЛ</button>
         <button id="btn-toggle-storm" class="btn-small">Пыльная буря: ВЫКЛ</button>
+        <button id="btn-spawn-horse" class="btn-small">Заспавнить лошадь</button>
       </div>
     </div>
   </div>
@@ -183,6 +192,19 @@
         <div class="hp-bar-fill" id="hp-bar-fill" style="width: 100%;"></div>
       </div>
       <span class="hp-num" id="hp-num">100 / 100</span>
+    </div>
+
+    <div class="horse-hud-row hidden" id="horse-hud-row">
+      <span class="horse-hud-tag">КОНЬ</span>
+      <div class="horse-bar-col">
+        <div class="horse-mini-wrap">
+          <div class="horse-hp-fill" id="horse-hp-fill" style="width: 100%;"></div>
+        </div>
+        <div class="horse-mini-wrap">
+          <div class="horse-calm-fill" id="horse-calm-fill" style="width: 100%;"></div>
+        </div>
+      </div>
+      <span class="horse-hud-val" id="horse-hud-val">150 HP</span>
     </div>
 
     <div class="weapons-bar" id="weapons-bar">

@@ -124,13 +124,8 @@
     osc.stop(start + dur + 0.02);
   }
 
-  // 2D-рейкастинг акустики: выпускает 12 лучей, строит отражения и обновляет описание эха
-  function triggerAcousticEcho(x, y, soundType, world, state, opts) {
-    const o = opts || {};
-    const skipHud = !!o.skipHudUpdate;
-    const distAtt = o.attenuation !== undefined ? o.attenuation : 1.0;
-    const basePan = o.pan !== undefined ? o.pan : 0;
-    const echoVol = G.CFG.phys.echo * distAtt;
+  // Чистый расчёт 12-лучевой акустики (работает и без AudioContext для AI-слуха)
+  function computeAcousticEcho(x, y, world, state) {
     const segments = (world && (world.soundSegments || world.wallSegments)) || [];
     const rayCount = 12;
     const maxDist = 520;
@@ -143,25 +138,34 @@
       const dy = Math.sin(ang);
       const hit = G.MATH.raycastSegments(x, y, dx, dy, maxDist, segments);
       if (hit) {
-        hits.push({ dist: hit.dist, dx, dy, x: hit.x, y: hit.y, mat: (hit.seg && hit.seg.mat) || 'wood' });
-        if (!skipHud) raysVis.push({ x1: x, y1: y, x2: hit.x, y2: hit.y, hit: true, life: 1.0, maxLife: 1.0 });
-      } else if (!skipHud) {
-        raysVis.push({ x1: x, y1: y, x2: x + dx * maxDist, y2: y + dy * maxDist, hit: false, life: 0.7, maxLife: 0.7 });
+        const rayIdx = raysVis.length;
+        raysVis.push({ x1: x, y1: y, x2: hit.x, y2: hit.y, hit: true, life: 1.0, maxLife: 1.0, echoDistracted: false });
+        hits.push({
+          dist: hit.dist,
+          dx,
+          dy,
+          x: hit.x,
+          y: hit.y,
+          mat: (hit.seg && hit.seg.mat) || 'wood',
+          rayIdx: rayIdx,
+          distracted: false
+        });
+      } else {
+        raysVis.push({ x1: x, y1: y, x2: x + dx * maxDist, y2: y + dy * maxDist, hit: false, life: 0.7, maxLife: 0.7, echoDistracted: false });
       }
     }
 
-    if (state && !skipHud) {
-      state.debugRays = raysVis;
-    }
-
     const hitRatio = hits.length / rayCount;
-    const avgDist = hits.length
-      ? hits.reduce((acc, h) => acc + h.dist, 0) / hits.length
-      : maxDist;
+    let distSum = 0;
+    let rockHits = 0;
+    for (let i = 0; i < hits.length; i++) {
+      distSum += hits[i].dist;
+      if (hits[i].mat === 'rock') rockHits++;
+    }
+    const avgDist = hits.length ? distSum / hits.length : maxDist;
 
     let envType = 'open';
     let envLabel = 'ОТКРЫТАЯ ПУСТОШЬ';
-    const rockHits = hits.filter((h) => h.mat === 'rock').length;
     const srcZone = (world && world.getZoneAt) ? world.getZoneAt(x, y).id : (state ? state.zone : 'open');
 
     if (hitRatio >= 0.75 && avgDist < 135) {
@@ -175,7 +179,24 @@
       envLabel = 'УЗКАЯ УЛОЧКА (SLAPBACK)';
     }
 
+    return { hits, raysVis, envType, envLabel };
+  }
+
+  // 2D-рейкастинг акустики: выпускает 12 лучей, строит отражения и обновляет описание эха
+  function triggerAcousticEcho(x, y, soundType, world, state, opts) {
+    const o = opts || {};
+    const skipHud = !!o.skipHudUpdate;
+    const distAtt = o.attenuation !== undefined ? o.attenuation : 1.0;
+    const basePan = o.pan !== undefined ? o.pan : 0;
+    const echoVol = G.CFG.phys.echo * distAtt;
+    const echo = o.precomputedEcho || computeAcousticEcho(x, y, world, state);
+    const hits = echo.hits;
+    const raysVis = echo.raysVis;
+    const envType = echo.envType;
+    const envLabel = echo.envLabel;
+
     if (state && !skipHud) {
+      if (!o.precomputedEcho) state.debugRays = raysVis;
       state.echoDesc = envLabel;
     }
 
@@ -236,6 +257,8 @@
   }
 
   G.AUDIO = {
+    computeAcousticEcho,
+
     unlock() {
       ensureCtx();
     },
@@ -489,6 +512,66 @@
       const now = ctx.currentTime;
       playNoise(now, 0.12, 'bandpass', 1400, 720, 0.12, 1.3);
       playTone(now + 0.04, 0.09, 'sine', 420, 580, 0.07);
+    },
+
+    playBanditReloadClick(kind, x, y, listenerX, listenerY) {
+      if (!ensureCtx()) return;
+      const dist = (x !== undefined && listenerX !== undefined)
+        ? Math.hypot(x - listenerX, (y || 0) - (listenerY || 0))
+        : 120;
+      if (dist > 460) return;
+      const att = G.MATH.clamp(1.0 - Math.max(0, dist - 50) / 410, 0.08, 0.55);
+      const pan = (listenerX !== undefined) ? G.MATH.clamp(((x || listenerX) - listenerX) / 340, -0.85, 0.85) : 0;
+      const dest = (Math.abs(pan) > 0.02 || att < 0.99) ? makePanner(pan) : masterGain;
+      const now = ctx.currentTime;
+      if (kind === 'insert') {
+        playNoise(now, 0.022, 'bandpass', 2650, 1500, 0.22 * att, 3.2, dest);
+        playTone(now + 0.014, 0.032, 'sine', 1520, 1180, 0.14 * att, dest);
+      } else if (kind === 'close') {
+        playNoise(now, 0.032, 'bandpass', 3000, 1400, 0.28 * att, 3.4, dest);
+        playTone(now, 0.040, 'triangle', 880, 420, 0.14 * att, dest);
+      } else {
+        playNoise(now, 0.036, 'bandpass', 1950, 1050, 0.22 * att, 2.8, dest);
+      }
+    },
+
+    playDoorSlam() {
+      if (!ensureCtx()) return;
+      const now = ctx.currentTime;
+      playTone(now, 0.14, 'triangle', 128, 42, 0.48);
+      playNoise(now, 0.12, 'bandpass', 780, 260, 0.42, 1.1);
+      playTone(now + 0.04, 0.16, 'sine', 620, 340, 0.12);
+    },
+
+    playBirdsFlush() {
+      if (!ensureCtx()) return;
+      const now = ctx.currentTime;
+      for (let i = 0; i < 4; i++) {
+        const t = now + i * 0.055;
+        playNoise(t, 0.09, 'bandpass', 1750 + i * 220, 820, 0.12, 1.3);
+      }
+      playTone(now + 0.02, 0.07, 'sine', 2450, 3150, 0.07);
+      playTone(now + 0.11, 0.08, 'sine', 2800, 2250, 0.06);
+      playTone(now + 0.20, 0.06, 'sine', 2600, 3200, 0.05);
+    },
+
+    playHoofbeat(surface) {
+      if (!ensureCtx()) return;
+      const now = ctx.currentTime;
+      const isWood = surface === 'wood';
+      const f1 = isWood ? 168 : 112;
+      playTone(now, 0.055, 'triangle', f1 + Math.random() * 22, 52, 0.18);
+      playNoise(now, 0.05, 'bandpass', isWood ? 880 : 1200, 360, 0.14, 1.2);
+      playTone(now + 0.085, 0.05, 'triangle', f1 * 1.12, 58, 0.14);
+      playNoise(now + 0.085, 0.045, 'bandpass', isWood ? 940 : 1280, 390, 0.11, 1.2);
+    },
+
+    playHorseNeigh() {
+      if (!ensureCtx()) return;
+      const now = ctx.currentTime;
+      playTone(now, 0.14, 'sawtooth', 420, 620, 0.13);
+      playTone(now + 0.12, 0.28, 'triangle', 600, 265, 0.16);
+      playNoise(now + 0.06, 0.26, 'bandpass', 1450, 650, 0.10, 1.4);
     }
   };
 })();
