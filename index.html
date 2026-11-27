@@ -9,9 +9,63 @@
 <body>
   <canvas id="game"></canvas>
 
-  <!-- Верхний правый угол: компактная кнопка настроек -->
+  <!-- Верхний правый угол: сеть, редактор и кнопка настроек -->
   <div id="hud-top-right">
-    <button id="btn-settings" class="btn-toggle" title="Физика, звук и управление">⚙</button>
+    <div class="top-actions-row">
+      <button id="btn-network" class="btn-toggle" title="Мультиплеер (WebRTC P2P)">🌐 СЕТЬ</button>
+      <button id="btn-editor" class="btn-toggle" title="Редактор уровня">⚒ РЕДАКТОР</button>
+      <button id="btn-settings" class="btn-toggle" title="Физика, звук и управление">⚙</button>
+    </div>
+    <div id="network-panel" class="panel hidden">
+      <div class="section-title">СЕТЕВАЯ ИГРА (WEBRTC P2P)</div>
+      <label class="net-field">
+        <span>ИМЯ БОЙЦА</span>
+        <input id="net-name" class="net-input" type="text" maxlength="18" value="СТРЕЛОК" />
+      </label>
+      <div class="net-row">
+        <button id="btn-net-mode" class="btn-small">Режим: Кооп</button>
+        <button id="btn-net-ff" class="btn-small">Огонь по своим: ВЫКЛ</button>
+      </div>
+
+      <div class="section-title">КОМНАТА PEERJS (WEST-XXXX)</div>
+      <div class="net-row">
+        <button id="btn-net-host" class="btn-small">Создать</button>
+        <span id="net-room-code" class="net-code-badge">---</span>
+        <button id="btn-net-copy-room" class="btn-small hidden">Коп.</button>
+      </div>
+      <div class="net-row">
+        <input id="net-join-code" class="net-input" type="text" maxlength="12" placeholder="WEST-1234" />
+        <button id="btn-net-join" class="btn-small">Войти</button>
+      </div>
+
+      <div class="section-title">РУЧНОЙ P2P (БЕЗ СЕРВЕРА)</div>
+      <div class="net-manual-grid">
+        <button id="btn-net-offer" class="btn-small">1. Offer (Хост)</button>
+        <button id="btn-net-accept-offer" class="btn-small">2. Answer (Гость)</button>
+        <button id="btn-net-apply-answer" class="btn-small">3. Принять Answer</button>
+        <button id="btn-net-copy-manual" class="btn-small">Коп. код</button>
+      </div>
+      <textarea id="net-manual-code" class="net-textarea" rows="3" placeholder="Вставь или скопируй Base64-код Offer / Answer..."></textarea>
+
+      <div id="net-status" class="net-status">ОФФЛАЙН (ОДИНОЧНАЯ ИГРА)</div>
+      <div id="net-players-list" class="net-roster"></div>
+      <button id="btn-net-disconnect" class="btn-small btn-warn hidden">Отключиться от комнаты</button>
+    </div>
+    <div id="editor-panel" class="panel hidden">
+      <div class="section-title">РЕДАКТОР УРОВНЯ (СЕТКА 8 PX)</div>
+      <div class="editor-tools-row">
+        <button id="btn-editor-place" class="btn-small active">Поставить</button>
+        <button id="btn-editor-rotate" class="btn-small">Повернуть [Q]</button>
+        <button id="btn-editor-erase" class="btn-small">Удалить [X]</button>
+      </div>
+      <div id="editor-palette" class="editor-palette"></div>
+      <div class="editor-hint">WASD камера • ЛКМ действие • ПКМ удалить</div>
+      <div class="bind-actions">
+        <button id="btn-editor-save" class="btn-small">Сохранить</button>
+        <button id="btn-editor-copy" class="btn-small">Скопировать JSON</button>
+        <button id="btn-editor-reset" class="btn-small btn-warn">Сбросить карту</button>
+      </div>
+    </div>
     <div id="settings-panel" class="panel hidden">
       <div class="section-title">ФИЗИКА И ЗВУК</div>
       <label class="slider-row">
@@ -41,8 +95,20 @@
         <input type="range" id="sl-accuracy" min="0" max="1" step="0.05" value="0.55" />
         <b id="val-accuracy">55%</b>
       </label>
+      <label class="slider-row">
+        <span>Лимит ботов</span>
+        <input type="range" id="sl-bot-cap" min="0" max="15" step="1" value="5" />
+        <b id="val-bot-cap">5</b>
+      </label>
+      <label class="slider-row">
+        <span>Интервал спавна</span>
+        <input type="range" id="sl-bot-interval" min="3" max="30" step="1" value="12" />
+        <b id="val-bot-interval">12с</b>
+      </label>
       <div class="bind-actions">
         <button id="btn-toggle-spawn" class="btn-small">Спавн ботов: ИДЁТ</button>
+        <button id="btn-respawn-enemies" class="btn-small">Возродить врагов</button>
+        <button id="btn-toggle-waves" class="btn-small">Запустить волны</button>
       </div>
 
       <div class="section-title">УПРАВЛЕНИЕ (КЛИК ДЛЯ ЗАМЕНЫ)</div>
@@ -58,16 +124,35 @@
         <span>Перекат</span>
         <button class="btn-bind" data-action="roll" id="bind-roll">Пробел</button>
       </div>
+      <div class="bind-row">
+        <span>Взаимодействие</span>
+        <button class="btn-bind" data-action="interact" id="bind-interact">E</button>
+      </div>
+      <div class="bind-row">
+        <span>Бинты (перевязка)</span>
+        <button class="btn-bind" data-action="bandage" id="bind-bandage">Q</button>
+      </div>
       <div class="bind-actions">
         <button id="btn-reset-binds" class="btn-small">Сброс</button>
         <button id="btn-toggle-rays" class="btn-small">Лучи (V): ВЫКЛ</button>
         <button id="btn-toggle-bandits" class="btn-small">Бандиты: ВКЛ</button>
+        <button id="btn-toggle-storm" class="btn-small">Пыльная буря: ВЫКЛ</button>
       </div>
     </div>
   </div>
 
   <!-- Короткое центральное уведомление -->
   <div id="center-toast" class="toast hidden"></div>
+
+  <!-- Компактное меню выбора шляп в салуне -->
+  <div id="hat-menu" class="panel hidden">
+    <div class="hat-menu-header">
+      <span>ГАРДЕРОБ САЛУНА</span>
+      <span id="hat-kills-count">УБИЙСТВ: 0</span>
+      <button id="btn-close-hats" class="btn-small">✕</button>
+    </div>
+    <div id="hat-list" class="hat-list"></div>
+  </div>
 
   <!-- Компактный иммерсивный виджет перезарядки в нижнем центре (не перекрывает поле боя) -->
   <div id="reload-panel" class="panel hidden">
@@ -85,6 +170,11 @@
     <div class="hud-meta-row">
       <span class="badge" id="zone-name">САЛУН</span>
       <span class="echo-tag" id="echo-info">ЗАКРЫТОЕ ПОМЕЩЕНИЕ</span>
+    </div>
+
+    <div class="wave-hud-row" id="wave-hud-row">
+      <span id="wave-label">СВОБОДНЫЙ БОЙ</span>
+      <span id="wave-enemies">ВРАГОВ: 5</span>
     </div>
 
     <div class="hp-box" id="hp-box">
@@ -118,6 +208,15 @@
       </div>
     </div>
 
+    <div class="inv-row" id="inv-row">
+      <button id="bandage-slot" class="inv-slot" title="Использовать бинт [Q]">
+        <span class="w-key">Q</span>
+        <span>БИНТЫ</span>
+        <b id="bandage-count">2/3</b>
+      </button>
+      <span id="bleed-badge" class="bleed-badge hidden">КРОВОТЕЧЕНИЕ</span>
+    </div>
+
     <div class="hud-foot-row">
       <span id="status-line" class="status-line">ГОТОВ К БОЮ</span>
     </div>
@@ -131,6 +230,8 @@
   <script defer src="js/audio.js"></script>
   <script defer src="js/world.js"></script>
   <script defer src="js/sim.js"></script>
+  <script defer src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script defer src="js/net.js"></script>
   <script defer src="js/render.js"></script>
 </body>
 </html>

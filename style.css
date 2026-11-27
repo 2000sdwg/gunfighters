@@ -81,6 +81,87 @@ html, body {
   z-index: 35;
 }
 
+.top-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#btn-editor {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 11px;
+  color: #f2da91;
+}
+
+#btn-editor.active {
+  background: #42120f;
+  border-color: #f2da91;
+  color: #fff6e0;
+}
+
+#editor-panel {
+  width: 300px;
+  cursor: default;
+}
+
+.editor-tools-row {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+
+.editor-tools-row .btn-small.active {
+  background: #332013;
+  border-color: #f2da91;
+  color: #f2da91;
+}
+
+.editor-palette {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.editor-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 4px 6px;
+  background: #1c110a;
+  border: 1px solid #4c311e;
+  color: #dfd4be;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.editor-item:hover {
+  border-color: #c89e45;
+  background: #332013;
+}
+
+.editor-item.active {
+  border-color: #f2da91;
+  background: #42120f;
+  color: #f2da91;
+}
+
+.editor-item-size {
+  font-size: 9px;
+  color: #b8ab93;
+}
+
+.editor-hint {
+  font-size: 9.5px;
+  color: #b8ab93;
+  text-align: center;
+  margin-bottom: 4px;
+}
+
 #btn-settings {
   width: 32px;
   height: 32px;
@@ -490,6 +571,329 @@ html, body {
   line-height: 1.3;
   border-top: 1px solid #3d2f23;
   padding-top: 4px;
+}
+
+.wave-hud-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #140f0c;
+  border: 1px solid #4c311e;
+  padding: 2px 6px;
+  font-size: 9.5px;
+  font-weight: bold;
+  letter-spacing: 0.6px;
+}
+
+.inv-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.inv-slot {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: #1c110a;
+  border: 1px solid #574636;
+  color: #dfd4be;
+  font-family: inherit;
+  font-size: 9.5px;
+  font-weight: bold;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+.inv-slot:hover {
+  border-color: #d6ae52;
+  background: #332013;
+}
+
+.inv-slot.empty {
+  opacity: 0.55;
+}
+
+.inv-slot.active-use {
+  border-color: #8ea164;
+  background: #222c1b;
+}
+
+#bandage-count {
+  color: #f2da91;
+}
+
+.bleed-badge {
+  background: #6e100c;
+  border: 1px solid #c9241c;
+  color: #fff2d6;
+  font-size: 9px;
+  font-weight: bold;
+  padding: 2px 5px;
+  letter-spacing: 0.5px;
+}
+
+#wave-label {
+  color: #f2da91;
+}
+
+#wave-label.wave-break {
+  color: #e3c068;
+}
+
+#wave-enemies {
+  color: #deb592;
+}
+
+/* Меню выбора шляп в салуне (Style Lock) */
+#hat-menu {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 332px;
+  z-index: 40;
+  cursor: default;
+}
+
+.hat-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: bold;
+  color: #f2da91;
+  border-bottom: 1px solid #4c311e;
+  padding-bottom: 5px;
+  margin-bottom: 6px;
+}
+
+#hat-kills-count {
+  font-size: 10px;
+  color: #c89e45;
+  margin-left: auto;
+}
+
+#btn-close-hats {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+}
+
+.hat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hat-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  background: #1c110a;
+  border: 1px solid #4c311e;
+  cursor: pointer;
+}
+
+.hat-item:hover:not(.locked) {
+  border-color: #d6ae52;
+  background: #332013;
+}
+
+.hat-item.active {
+  border-color: #f2da91;
+  background: #42120f;
+}
+
+.hat-item.locked {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.hat-preview {
+  width: 30px;
+  height: 30px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background: #140f0c;
+  border: 1px solid #332013;
+  flex: 0 0 30px;
+}
+
+.hat-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.hat-name {
+  font-size: 10.5px;
+  font-weight: bold;
+  color: #f2da91;
+}
+
+.hat-meta {
+  font-size: 9px;
+  color: #b8ab93;
+}
+
+.hat-badge {
+  font-size: 9px;
+  font-weight: bold;
+  color: #c89e45;
+}
+
+.hat-item.locked .hat-badge {
+  color: #a83c2e;
+}
+
+/* ==================== ПАНЕЛЬ МУЛЬТИПЛЕЕРА (WEBRTC P2P, STYLE LOCK) ==================== */
+
+#btn-network {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 11px;
+  color: #b8d4d9;
+}
+
+#btn-network.active {
+  background: #24383c;
+  border-color: #f2da91;
+  color: #fff6e0;
+}
+
+#btn-editor:disabled,
+.btn-small:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+#network-panel {
+  width: 312px;
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  cursor: default;
+}
+
+#network-panel input,
+#network-panel textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.net-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10.5px;
+  color: #cfc2a9;
+  margin-bottom: 6px;
+}
+
+.net-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 5px;
+}
+
+.net-row .btn-small {
+  flex: 1;
+}
+
+.net-input {
+  flex: 1;
+  min-width: 0;
+  background: #140f0c;
+  border: 1px solid #574636;
+  color: #f2da91;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: bold;
+  padding: 4px 6px;
+  outline: none;
+}
+
+.net-input:focus,
+.net-textarea:focus {
+  border-color: #c89e45;
+}
+
+.net-code-badge {
+  flex: 1;
+  text-align: center;
+  background: #140f0c;
+  border: 1px solid #4c311e;
+  color: #f2da91;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  padding: 4px 6px;
+}
+
+.net-manual-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  margin-bottom: 5px;
+}
+
+.net-textarea {
+  width: 100%;
+  resize: vertical;
+  background: #140f0c;
+  border: 1px solid #574636;
+  color: #dfd4be;
+  font-family: inherit;
+  font-size: 9.5px;
+  padding: 4px 5px;
+  margin-bottom: 6px;
+  outline: none;
+}
+
+.net-status {
+  background: #1c110a;
+  border: 1px solid #4c311e;
+  color: #e3c068;
+  font-size: 10px;
+  font-weight: bold;
+  padding: 4px 6px;
+  margin-bottom: 5px;
+  word-break: break-word;
+}
+
+.net-roster {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 6px;
+}
+
+.net-roster-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #140f0c;
+  border: 1px solid #332013;
+  padding: 3px 6px;
+  font-size: 10px;
+  color: #dfd4be;
+}
+
+.net-roster-row.local {
+  border-color: #c89e45;
+  color: #f2da91;
+}
+
+.net-roster-meta {
+  font-size: 9px;
+  color: #b8ab93;
+}
+
+#btn-net-disconnect {
+  width: 100%;
 }
 
 @media (max-width: 640px) {

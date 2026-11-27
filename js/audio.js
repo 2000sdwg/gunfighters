@@ -3,6 +3,10 @@
 
   let ctx = null;
   let masterGain = null;
+  let masterFilter = null;
+  let tinnitusGain = null;
+  let windGain = null;
+  let windFilter = null;
   let noiseBuf = null;
 
   function ensureCtx() {
@@ -18,9 +22,15 @@
       comp.attack.value = 0.002;
       comp.release.value = 0.14;
 
+      masterFilter = ctx.createBiquadFilter();
+      masterFilter.type = 'lowpass';
+      masterFilter.frequency.value = 18000;
+      masterFilter.Q.value = 0.6;
+
       masterGain = ctx.createGain();
       masterGain.gain.value = 0.82;
-      masterGain.connect(comp);
+      masterGain.connect(masterFilter);
+      masterFilter.connect(comp);
       comp.connect(ctx.destination);
 
       // Заранее генерируем буфер белого шума (1.5 сек)
@@ -30,6 +40,31 @@
       for (let i = 0; i < len; i++) {
         data[i] = Math.random() * 2 - 1;
       }
+
+      // Непрерывный узел звона в ушах при контузии (gain = 0 в норме)
+      const tOsc = ctx.createOscillator();
+      tOsc.type = 'sine';
+      tOsc.frequency.value = 3920;
+      tinnitusGain = ctx.createGain();
+      tinnitusGain.gain.value = 0;
+      tOsc.connect(tinnitusGain);
+      tinnitusGain.connect(comp);
+      tOsc.start(0);
+
+      // Непрерывный узел процедурного воющего ветра для пыльной бури (gain = 0 вне бури)
+      const wSrc = ctx.createBufferSource();
+      wSrc.buffer = noiseBuf;
+      wSrc.loop = true;
+      windFilter = ctx.createBiquadFilter();
+      windFilter.type = 'bandpass';
+      windFilter.frequency.value = 360;
+      windFilter.Q.value = 2.6;
+      windGain = ctx.createGain();
+      windGain.gain.value = 0;
+      wSrc.connect(windFilter);
+      windFilter.connect(windGain);
+      windGain.connect(masterFilter);
+      wSrc.start(0);
     }
     if (ctx.state === 'suspended') {
       ctx.resume().catch(() => {});
@@ -90,8 +125,12 @@
   }
 
   // 2D-рейкастинг акустики: выпускает 12 лучей, строит отражения и обновляет описание эха
-  function triggerAcousticEcho(x, y, soundType, world, state) {
-    const echoVol = G.CFG.phys.echo;
+  function triggerAcousticEcho(x, y, soundType, world, state, opts) {
+    const o = opts || {};
+    const skipHud = !!o.skipHudUpdate;
+    const distAtt = o.attenuation !== undefined ? o.attenuation : 1.0;
+    const basePan = o.pan !== undefined ? o.pan : 0;
+    const echoVol = G.CFG.phys.echo * distAtt;
     const segments = (world && (world.soundSegments || world.wallSegments)) || [];
     const rayCount = 12;
     const maxDist = 520;
@@ -105,13 +144,13 @@
       const hit = G.MATH.raycastSegments(x, y, dx, dy, maxDist, segments);
       if (hit) {
         hits.push({ dist: hit.dist, dx, dy, x: hit.x, y: hit.y, mat: (hit.seg && hit.seg.mat) || 'wood' });
-        raysVis.push({ x1: x, y1: y, x2: hit.x, y2: hit.y, hit: true, life: 1.0, maxLife: 1.0 });
-      } else {
+        if (!skipHud) raysVis.push({ x1: x, y1: y, x2: hit.x, y2: hit.y, hit: true, life: 1.0, maxLife: 1.0 });
+      } else if (!skipHud) {
         raysVis.push({ x1: x, y1: y, x2: x + dx * maxDist, y2: y + dy * maxDist, hit: false, life: 0.7, maxLife: 0.7 });
       }
     }
 
-    if (state) {
+    if (state && !skipHud) {
       state.debugRays = raysVis;
     }
 
@@ -123,11 +162,12 @@
     let envType = 'open';
     let envLabel = 'ОТКРЫТАЯ ПУСТОШЬ';
     const rockHits = hits.filter((h) => h.mat === 'rock').length;
+    const srcZone = (world && world.getZoneAt) ? world.getZoneAt(x, y).id : (state ? state.zone : 'open');
 
     if (hitRatio >= 0.75 && avgDist < 135) {
       envType = 'room';
       envLabel = 'ЗАКРЫТОЕ ПОМЕЩЕНИЕ';
-    } else if (rockHits >= 3 || (state && state.zone === 'canyon')) {
+    } else if (rockHits >= 3 || srcZone === 'canyon') {
       envType = 'canyon';
       envLabel = 'УЩЕЛЬЕ КАНЬОНА';
     } else if (hits.length >= 4 && avgDist < 220) {
@@ -135,7 +175,7 @@
       envLabel = 'УЗКАЯ УЛОЧКА (SLAPBACK)';
     }
 
-    if (state) {
+    if (state && !skipHud) {
       state.echoDesc = envLabel;
     }
 
@@ -148,12 +188,12 @@
       // Короткий жёсткий отбой стен комнаты + гулкое затухание дерева
       for (let i = 0; i < 4; i++) {
         const delay = 0.022 + i * 0.028 + Math.random() * 0.012;
-        const pan = (i % 2 === 0 ? -0.45 : 0.45);
+        const pan = basePan * 0.6 + (i % 2 === 0 ? -0.35 : 0.35);
         const dest = makePanner(pan);
         playNoise(now + delay, 0.14 + i * 0.04, 'bandpass', 950 - i * 160, 260, 0.22 * echoVol * baseTail / (1 + i * 0.45), 1.1, dest);
       }
       // Лёгкий резонансный хвост внутри салуна
-      playNoise(now + 0.05, 0.34, 'lowpass', 620, 180, 0.16 * echoVol * baseTail, 0.8);
+      playNoise(now + 0.05, 0.34, 'lowpass', 620, 180, 0.16 * echoVol * baseTail, 0.8, makePanner(basePan * 0.5));
       return;
     }
 
@@ -162,11 +202,11 @@
       const sorted = hits.slice().sort((a, b) => a.dist - b.dist).slice(0, 5);
       sorted.forEach((h, idx) => {
         const delay = 0.045 + (h.dist / 360) * 0.16 + idx * 0.018;
-        const dest = makePanner(h.dx * 0.75);
+        const dest = makePanner(basePan * 0.55 + h.dx * 0.45);
         playNoise(now + delay, 0.16, 'bandpass', 1200 - idx * 140, 320, 0.24 * echoVol * baseTail / (1 + idx * 0.35), 1.4, dest);
       });
       // Вторичный перекат вдоль улицы
-      playNoise(now + 0.24, 0.38, 'lowpass', 700, 190, 0.12 * echoVol * baseTail, 0.7);
+      playNoise(now + 0.24, 0.38, 'lowpass', 700, 190, 0.12 * echoVol * baseTail, 0.7, makePanner(basePan * 0.5));
       return;
     }
 
@@ -182,17 +222,17 @@
         const dur = 0.34 + idx * 0.18;
         const freq = 950 - idx * 230;
         const gain = (0.28 / (1 + idx * 0.55)) * echoVol * baseTail;
-        const dest = makePanner(h.dx * 0.85);
+        const dest = makePanner(basePan * 0.5 + h.dx * 0.55);
         playNoise(now + delay, dur, 'lowpass', freq, 140, gain, 0.9, dest);
         playTone(now + delay, dur * 0.45, 'triangle', 145 - idx * 24, 55, gain * 0.38, dest);
       });
       // Дальний затухающий рокот ущелья
-      playNoise(now + 0.58, 0.65, 'lowpass', 420, 110, 0.11 * echoVol * baseTail, 0.6);
+      playNoise(now + 0.58, 0.65, 'lowpass', 420, 110, 0.11 * echoVol * baseTail, 0.6, makePanner(basePan * 0.4));
       return;
     }
 
     // Открытая пустошь: сухой, короткий дальний хвост
-    playNoise(now + 0.06, 0.20, 'lowpass', 650, 180, 0.09 * echoVol * baseTail, 0.7);
+    playNoise(now + 0.06, 0.20, 'lowpass', 650, 180, 0.09 * echoVol * baseTail, 0.7, makePanner(basePan * 0.5));
   }
 
   G.AUDIO = {
@@ -200,30 +240,47 @@
       ensureCtx();
     },
 
-    playShot(weapon, x, y, world, state) {
+    playShot(weapon, x, y, world, state, opts) {
       if (!ensureCtx()) return;
       const now = ctx.currentTime;
-      const type = weapon.soundType || 'walker';
+      const wObj = (typeof weapon === 'string') ? { soundType: weapon } : (weapon || { soundType: 'walker' });
+      const type = wObj.soundType || 'walker';
+
+      let att = 1.0;
+      let pan = 0;
+      const o = opts || {};
+      if (o.isEnemy || o.listenerX !== undefined) {
+        const lx = o.listenerX !== undefined ? o.listenerX : (state && state.player ? state.player.x : x);
+        const ly = o.listenerY !== undefined ? o.listenerY : (state && state.player ? state.player.y : y);
+        const dist = Math.hypot((x || lx) - lx, (y || ly) - ly);
+        att = G.MATH.clamp(1.0 - Math.max(0, dist - 70) / 880, 0.10, 0.92);
+        pan = G.MATH.clamp(((x || lx) - lx) / 360, -0.88, 0.88);
+      }
+      const dest = (Math.abs(pan) > 0.02 || att < 0.99) ? makePanner(pan) : masterGain;
 
       if (type === 'walker') {
         // Тяжёлый чёрнопороховой грохот Colt Walker (.44)
-        playTone(now, 0.17, 'triangle', 155, 34, 0.72);
-        playTone(now, 0.09, 'sawtooth', 92, 32, 0.38);
-        playNoise(now, 0.24, 'lowpass', 2400, 260, 0.75, 0.9);
-        playNoise(now, 0.065, 'highpass', 1500, 900, 0.48, 0.7);
+        playTone(now, 0.17, 'triangle', 155, 34, 0.72 * att, dest);
+        playTone(now, 0.09, 'sawtooth', 92, 32, 0.38 * att, dest);
+        playNoise(now, 0.24, 'lowpass', 2400, 260, 0.75 * att, 0.9, dest);
+        playNoise(now, 0.065, 'highpass', 1500, 900, 0.48 * att, 0.7, dest);
       } else if (type === 'lightning') {
         // Резкий, сухой хлопок компактного .38 Lightning
-        playTone(now, 0.09, 'triangle', 230, 58, 0.48);
-        playNoise(now, 0.14, 'bandpass', 2100, 480, 0.56, 0.9);
-        playNoise(now, 0.045, 'highpass', 2200, 1200, 0.40, 0.8);
+        playTone(now, 0.09, 'triangle', 230, 58, 0.48 * att, dest);
+        playNoise(now, 0.14, 'bandpass', 2100, 480, 0.56 * att, 0.9, dest);
+        playNoise(now, 0.045, 'highpass', 2200, 1200, 0.40 * att, 0.8, dest);
       } else {
         // Хлёсткий винтовочный кнут Winchester 1873
-        playTone(now, 0.13, 'sawtooth', 210, 42, 0.58);
-        playNoise(now, 0.20, 'lowpass', 3600, 380, 0.70, 1.0);
-        playNoise(now, 0.055, 'highpass', 2600, 1400, 0.52, 1.2);
+        playTone(now, 0.13, 'sawtooth', 210, 42, 0.58 * att, dest);
+        playNoise(now, 0.20, 'lowpass', 3600, 380, 0.70 * att, 1.0, dest);
+        playNoise(now, 0.055, 'highpass', 2600, 1400, 0.52 * att, 1.2, dest);
       }
 
-      triggerAcousticEcho(x, y, type, world, state);
+      triggerAcousticEcho(x, y, type, world, state, {
+        skipHudUpdate: !!o.skipHudUpdate,
+        attenuation: att,
+        pan: pan
+      });
     },
 
     playCock(action) {
@@ -350,6 +407,88 @@
       } else {
         playNoise(now, 0.045, 'bandpass', 950 + Math.random() * 250, 380, 0.07, 1.0);
       }
+    },
+
+    playDrink() {
+      if (!ensureCtx()) return;
+      const now = ctx.currentTime;
+      // Щелчок пробки + два коротких булькающих глотка
+      playTone(now, 0.035, 'sine', 620, 980, 0.16);
+      playTone(now + 0.08, 0.085, 'sine', 240, 440, 0.22);
+      playTone(now + 0.19, 0.095, 'sine', 270, 510, 0.20);
+      playNoise(now + 0.08, 0.16, 'bandpass', 720, 360, 0.09, 1.4);
+    },
+
+    playHatEquip() {
+      if (!ensureCtx()) return;
+      const now = ctx.currentTime;
+      playNoise(now, 0.09, 'bandpass', 1200, 520, 0.14, 1.1);
+      playTone(now + 0.02, 0.05, 'triangle', 290, 160, 0.09);
+    },
+
+    playWaveHorn(isStart) {
+      if (!ensureCtx()) return;
+      const now = ctx.currentTime;
+      if (isStart) {
+        playTone(now, 0.24, 'triangle', 196, 294, 0.18);
+        playTone(now + 0.16, 0.34, 'triangle', 294, 392, 0.16);
+      } else {
+        playTone(now, 0.20, 'triangle', 392, 523, 0.15);
+        playTone(now + 0.14, 0.30, 'sine', 523, 659, 0.14);
+      }
+    },
+
+    playBanditHelp() {
+      if (!ensureCtx()) return;
+      const now = ctx.currentTime;
+      playTone(now, 0.14, 'triangle', 640, 920, 0.12);
+      playTone(now + 0.14, 0.16, 'triangle', 760, 540, 0.10);
+    },
+
+    playRicochet(x, y, listenerX, listenerY) {
+      if (!ensureCtx()) return;
+      const now = ctx.currentTime;
+      let att = 1.0;
+      let pan = 0;
+      if (x !== undefined && listenerX !== undefined) {
+        const dist = Math.hypot(x - listenerX, (y || 0) - (listenerY || 0));
+        att = G.MATH.clamp(1.0 - Math.max(0, dist - 60) / 760, 0.12, 1.0);
+        pan = G.MATH.clamp((x - listenerX) / 360, -0.88, 0.88);
+      }
+      const dest = (Math.abs(pan) > 0.02 || att < 0.99) ? makePanner(pan) : masterGain;
+      const startF = 2300 + Math.random() * 850;
+      const endF = 540 + Math.random() * 240;
+      playTone(now, 0.22, 'sine', startF, endF, 0.28 * att, dest);
+      playTone(now, 0.14, 'triangle', startF * 0.72, endF * 0.85, 0.14 * att, dest);
+      playNoise(now, 0.055, 'highpass', 2400, 1200, 0.24 * att, 1.8, dest);
+    },
+
+    setConcussion(level) {
+      if (!ctx || !masterFilter || !tinnitusGain) return;
+      const lv = G.MATH.clamp(level || 0, 0, 1);
+      const freq = 18000 - (18000 - 720) * Math.pow(lv, 0.65);
+      masterFilter.frequency.value = freq;
+      tinnitusGain.gain.value = lv > 0.03 ? lv * 0.024 : 0;
+    },
+
+    updateWind(stormIntensity, outdoors, timeSec) {
+      if (!ctx || !windGain || !windFilter) return;
+      const iv = G.MATH.clamp(stormIntensity || 0, 0, 1);
+      if (iv <= 0.01) {
+        windGain.gain.value = 0;
+        return;
+      }
+      const envScale = outdoors ? 1.0 : 0.20;
+      const howl = Math.sin((timeSec || 0) * 0.9) * 110 + Math.sin((timeSec || 0) * 2.3) * 45;
+      windFilter.frequency.value = G.MATH.clamp(380 + howl + iv * 160, 180, 950);
+      windGain.gain.value = iv * 0.16 * envScale;
+    },
+
+    playBandage() {
+      if (!ensureCtx()) return;
+      const now = ctx.currentTime;
+      playNoise(now, 0.12, 'bandpass', 1400, 720, 0.12, 1.3);
+      playTone(now + 0.04, 0.09, 'sine', 420, 580, 0.07);
     }
   };
 })();

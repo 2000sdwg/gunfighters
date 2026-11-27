@@ -3,12 +3,25 @@
 
   const STORAGE_KEY = 'gunfighter_keybinds_v1';
   const SETTINGS_KEY = 'gunfighter_settings_v1';
+  const PROGRESS_KEY = 'gunfighter_progress_v1';
 
   const DEFAULT_KEYS = {
     cock: 'ShiftLeft',
     cover: 'Space',
-    roll: 'Space'
+    roll: 'Space',
+    interact: 'KeyE',
+    bandage: 'KeyQ'
   };
+
+  // Каталог сменных шляп (открываются за убийства, хранятся в localStorage)
+  G.HATS = [
+    { id: 'classic',    name: 'Классическая ковбойская', kills: 0,  desc: 'Проверенная временем фетровая шляпа' },
+    { id: 'gunslinger', name: 'Потрёпанная шляпа стрелка', kills: 5,  desc: 'Выгоревшие поля с боевым заломом' },
+    { id: 'sheriff',    name: 'Шляпа шерифа',            kills: 15, desc: 'Латунная лента и звезда закона' },
+    { id: 'bowler',     name: 'Котелок джентльмена',      kills: 25, desc: 'Городской шик прерий с алой лентой' },
+    { id: 'sombrero',   name: 'Сомбреро',                 kills: 40, desc: 'Широкие расшитые поля от палящего солнца' },
+    { id: 'legend',     name: 'Шляпа Легенды Полудня',    kills: 60, desc: 'Тёмный силуэт с золотой окантовкой' }
+  ];
 
   // Единая расширенная 5-ступенчатая палитра по референсам (тёплое солнце + прохладные тени)
   G.PAL = {
@@ -59,11 +72,11 @@
     playerMaxHp: 100,
     spawnBandits: true,
 
-    // Боты: меткость 0..1 (влияет на разброс их выстрелов) и остановка появления новых
+    // Боты: меткость 0..1, лимит живых врагов, интервал спавна и пауза
     botAccuracy: 0.55,
     pauseSpawn: false,
-    botMaxAlive: 6,
-    botSpawnInterval: 7.0,
+    botMaxAlive: 5,
+    botSpawnInterval: 12.0,
 
     walkSpeed: 105,
     focusSpeed: 58,
@@ -88,7 +101,12 @@
     },
 
     keys: { ...DEFAULT_KEYS },
-    debugRays: false
+    debugRays: false,
+
+    // Прогресс игрока (убийства и выбранная шляпа)
+    kills: 0,
+    selectedHat: 'classic',
+    playerName: 'СТРЕЛОК'
   };
 
   G.loadKeys = function () {
@@ -124,8 +142,17 @@
       if (typeof s.botAccuracy === 'number') {
         G.CFG.botAccuracy = G.MATH.clamp(s.botAccuracy, 0, 1);
       }
+      if (typeof s.botMaxAlive === 'number') {
+        G.CFG.botMaxAlive = Math.round(G.MATH.clamp(s.botMaxAlive, 0, 15));
+      }
+      if (typeof s.botSpawnInterval === 'number') {
+        G.CFG.botSpawnInterval = G.MATH.clamp(s.botSpawnInterval, 3, 30);
+      }
       if (typeof s.pauseSpawn === 'boolean') G.CFG.pauseSpawn = s.pauseSpawn;
       if (typeof s.spawnBandits === 'boolean') G.CFG.spawnBandits = s.spawnBandits;
+      if (typeof s.playerName === 'string' && s.playerName.trim()) {
+        G.CFG.playerName = s.playerName.trim().slice(0, 18);
+      }
       if (s.phys && typeof s.phys === 'object') {
         ['inertia', 'recoil', 'spring', 'echo'].forEach((k) => {
           if (typeof s.phys[k] === 'number') G.CFG.phys[k] = s.phys[k];
@@ -138,11 +165,72 @@
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify({
         botAccuracy: G.CFG.botAccuracy,
+        botMaxAlive: G.CFG.botMaxAlive,
+        botSpawnInterval: G.CFG.botSpawnInterval,
         pauseSpawn: G.CFG.pauseSpawn,
         spawnBandits: G.CFG.spawnBandits,
+        playerName: G.CFG.playerName || 'СТРЕЛОК',
         phys: { ...G.CFG.phys }
       }));
     } catch (_) {}
+  };
+
+  // ==================== ПРОГРЕСС (УБИЙСТВА И ШЛЯПЫ) ====================
+
+  G.getHatDef = function (id) {
+    for (let i = 0; i < G.HATS.length; i++) {
+      if (G.HATS[i].id === id) return G.HATS[i];
+    }
+    return G.HATS[0];
+  };
+
+  G.isHatUnlocked = function (id) {
+    const def = G.getHatDef(id);
+    return (G.CFG.kills || 0) >= (def.kills || 0);
+  };
+
+  G.saveProgress = function () {
+    try {
+      localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+        kills: G.CFG.kills || 0,
+        selectedHat: G.CFG.selectedHat || 'classic'
+      }));
+    } catch (_) {}
+  };
+
+  G.loadProgress = function () {
+    try {
+      const raw = localStorage.getItem(PROGRESS_KEY);
+      if (!raw) return;
+      const p = JSON.parse(raw);
+      if (typeof p.kills === 'number' && isFinite(p.kills)) {
+        G.CFG.kills = Math.max(0, Math.floor(p.kills));
+      }
+      if (typeof p.selectedHat === 'string') {
+        const def = G.getHatDef(p.selectedHat);
+        G.CFG.selectedHat = G.isHatUnlocked(def.id) ? def.id : 'classic';
+      }
+    } catch (_) {}
+  };
+
+  G.setSelectedHat = function (id) {
+    if (!G.isHatUnlocked(id)) return false;
+    G.CFG.selectedHat = G.getHatDef(id).id;
+    G.saveProgress();
+    return true;
+  };
+
+  G.addKill = function (delta) {
+    const prev = G.CFG.kills || 0;
+    const next = prev + Math.max(1, delta || 1);
+    G.CFG.kills = next;
+    G.saveProgress();
+    const unlocked = [];
+    for (let i = 0; i < G.HATS.length; i++) {
+      const h = G.HATS[i];
+      if (h.kills > prev && h.kills <= next) unlocked.push(h);
+    }
+    return unlocked;
   };
 
   G.matchesKey = function (action, code) {
@@ -202,6 +290,7 @@
       falloffEnd: 460,
       falloffMinMult: 0.68,
       bulletSpeed: 960,
+      penetration: 1,
 
       soundType: 'walker',
       colorSteel: '#c8c4bc',
@@ -240,6 +329,7 @@
       falloffEnd: 310,
       falloffMinMult: 0.52,
       bulletSpeed: 810,
+      penetration: 0,
 
       soundType: 'lightning',
       colorSteel: '#5d636b',
@@ -276,6 +366,7 @@
       falloffEnd: 820,
       falloffMinMult: 0.88,
       bulletSpeed: 1280,
+      penetration: 2,
 
       soundType: 'winchester',
       colorSteel: '#6c7075',
@@ -387,12 +478,123 @@
     };
   };
 
-  G.createInitialState = function () {
+  G.createPlayerState = function (id, x, y, opts) {
+    opts = opts || {};
+    const pid = id || 'local';
+    const px = x !== undefined ? x : 150;
+    const py = y !== undefined ? y : 360;
     return {
+      id: pid,
+      name: (opts.name || G.CFG.playerName || 'СТРЕЛОК').slice(0, 18),
+      isLocal: opts.isLocal !== undefined ? !!opts.isLocal : (pid === 'local'),
+      hatId: opts.hatId || G.CFG.selectedHat || 'classic',
+      coatColor: opts.coatColor || null,
+      coatTrim: opts.coatTrim || null,
+      bandanaColor: opts.bandanaColor || null,
+
+      x: px,
+      y: py,
+      hp: 100,
+      maxHp: 100,
+      dead: false,
+      respawnTimer: 0,
+      hurtTimer: 0,
+      regenTimer: 0,
+      vx: 0,
+      vy: 0,
+      speed: 0,
+      aimAngle: 0,
+      aimVel: 0,
+      targetAngle: 0,
+      spread: 0.044,
+      bloom: 0,
+      breathPhase: 0,
+      walkPhase: 0,
+      wallBlocked: false,
+      wallHitDist: 999,
+      wallRaiseFrac: 0,
+      flashTimer: 0,
+      recoilKickAnim: 0,
+
+      rolling: false,
+      rollTimer: 0,
+      rollCooldown: 0,
+      rollDx: 0,
+      rollDy: 0,
+
+      inCover: false,
+      peeking: false,
+      peekFrac: 0,
+      peekSide: 1,
+      coverFrac: 0,
+      crouchFrac: 0,
+      coverObj: null,
+      coverNormalX: 0,
+      coverNormalY: 0,
+      nearCover: null,
+      nearInteractable: null,
+
+      idleTimer: 0,
+      smokingState: null,
+      smokeAnimTime: 0,
+
+      // Критическое состояние, кровотечение, контузия и бинты
+      critical: false,
+      bleeding: false,
+      bleedDripTimer: 0,
+      concussion: 0,
+      indoorRingTimer: 0,
+      bandages: 2,
+      maxBandages: 3,
+      bandaging: false,
+      bandageTimer: 0,
+      bandageDur: 2.5,
+      drinking: false,
+      drinkTimer: 0,
+      drinkDur: 1.8,
+
+      kills: 0,
+      deaths: 0,
+
+      weaponIdx: 0,
+      weapons: G.WEAPONS.map(G.createWeaponState),
+
+      input: {
+        keys: {},
+        worldMouseX: px + 60,
+        worldMouseY: py,
+        lmb: false,
+        rmb: false
+      }
+    };
+  };
+
+  G.getPlayersList = function (state) {
+    if (!state) return [];
+    if (state.players) return Object.values(state.players);
+    return state.player ? [state.player] : [];
+  };
+
+  G.createInitialState = function () {
+    const localId = 'local';
+    const localPlayer = G.createPlayerState(localId, 150, 360, {
+      isLocal: true,
+      name: G.CFG.playerName || 'СТРЕЛОК',
+      hatId: G.CFG.selectedHat || 'classic'
+    });
+
+    const state = {
       time: 0,
       zone: 'saloon',
       zoneLabel: 'САЛУН',
       echoDesc: 'ЗАКРЫТОЕ ПОМЕЩЕНИЕ',
+      localPlayerId: localId,
+      players: {
+        [localId]: localPlayer
+      },
+      mpMode: 'coop', // 'coop' | 'pvp'
+      friendlyFire: false,
+      netRole: 'offline', // 'offline' | 'host' | 'client'
       input: {
         keys: {},
         mouseX: 0,
@@ -402,48 +604,6 @@
         lmb: false,
         rmb: false,
         rebindingAction: null
-      },
-      player: {
-        x: 150,
-        y: 360,
-        hp: 100,
-        maxHp: 100,
-        hurtTimer: 0,
-        regenTimer: 0,
-        vx: 0,
-        vy: 0,
-        speed: 0,
-        aimAngle: 0,
-        aimVel: 0,
-        targetAngle: 0,
-        spread: 0.044,
-        bloom: 0,
-        breathPhase: 0,
-        walkPhase: 0,
-        wallBlocked: false,
-        wallHitDist: 999,
-        wallRaiseFrac: 0,
-        flashTimer: 0,
-        recoilKickAnim: 0,
-
-        rolling: false,
-        rollTimer: 0,
-        rollCooldown: 0,
-        rollDx: 0,
-        rollDy: 0,
-
-        inCover: false,
-        peeking: false,
-        peekFrac: 0,
-        peekSide: 1,
-        coverFrac: 0,
-        coverObj: null,
-        coverNormalX: 0,
-        coverNormalY: 0,
-        nearCover: null,
-
-        weaponIdx: 0,
-        weapons: G.WEAPONS.map(G.createWeaponState)
       },
       camera: {
         x: 150,
@@ -455,15 +615,67 @@
       bullets: [],
       shells: [],
       bloodDrops: [],
+      bloodTrail: [],
       flyingHats: [],
       waterRipples: [],
       particles: [],
       decals: [],
+      gunSmokeClouds: [],
+      smokeFlashes: [],
       debugRays: [],
-      toast: { text: '', timer: 0 }
+      toast: { text: '', timer: 0 },
+      nearInteractable: null,
+      hatMenuOpen: false,
+      saloonProps: {
+        bourbonAvailable: true,
+        bourbonInHand: false
+      },
+      fleeCooldown: 0,
+      dustStorm: {
+        active: false,
+        intensity: 0,
+        timer: 0,
+        duration: 0,
+        cooldown: 36,
+        tumbleweeds: []
+      },
+      editor: {
+        active: false,
+        tool: 'place', // 'place' | 'erase'
+        selectedType: 'crate',
+        rotated: false,
+        gridStep: 8,
+        hoverSolidId: null,
+        camX: 250,
+        camY: 360
+      },
+      waves: {
+        active: false,
+        wave: 0,
+        phase: 'idle', // 'idle' | 'fighting' | 'break'
+        breakTimer: 0,
+        totalSpawned: 0
+      }
     };
+
+    // Обратная совместимость: state.player всегда указывает на локального игрока
+    Object.defineProperty(state, 'player', {
+      get() {
+        return (this.players && this.players[this.localPlayerId]) || (this.players && Object.values(this.players)[0]) || null;
+      },
+      set(val) {
+        if (val && this.players) {
+          this.players[this.localPlayerId] = val;
+        }
+      },
+      enumerable: true,
+      configurable: true
+    });
+
+    return state;
   };
 
   G.loadKeys();
   G.loadSettings();
+  G.loadProgress();
 })();
