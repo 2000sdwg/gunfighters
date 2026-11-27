@@ -105,13 +105,15 @@ html, body {
   cursor: default;
 }
 
-.editor-tools-row {
+.editor-tools-row,
+.editor-tabs-row {
   display: flex;
   gap: 5px;
   margin-bottom: 6px;
 }
 
-.editor-tools-row .btn-small.active {
+.editor-tools-row .btn-small.active,
+.editor-tabs-row .btn-small.active {
   background: #332013;
   border-color: #f2da91;
   color: #f2da91;
@@ -122,6 +124,9 @@ html, body {
   grid-template-columns: repeat(2, 1fr);
   gap: 4px;
   margin-bottom: 6px;
+  max-height: 224px;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .editor-item {
@@ -270,11 +275,81 @@ html, body {
   padding: 4px 6px;
 }
 
+.btn-small.active {
+  background: #332013;
+  border-color: #f2da91;
+  color: #f2da91;
+}
+
 /* Активное предупреждающее состояние кнопки (например, «Спавн ботов: СТОП») */
 .btn-small.btn-warn {
   background: rgba(134, 42, 32, 0.92);
   border-color: #a83c2e;
   color: #f6e3cd;
+}
+
+.horse-hud-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+  padding: 2px 5px;
+  background: #1c110a;
+  border: 1px solid #4c311e;
+}
+
+.horse-hud-tag {
+  font-size: 9px;
+  font-weight: bold;
+  color: #e3c068;
+  letter-spacing: 0.4px;
+}
+
+.horse-bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.horse-mini-wrap {
+  height: 4px;
+  background: #140f0c;
+  border: 1px solid #332013;
+}
+
+.horse-hp-fill {
+  height: 100%;
+  background: #c9241c;
+}
+
+.horse-calm-fill {
+  height: 100%;
+  background: #7ba4ad;
+}
+
+.horse-hud-val {
+  font-size: 9px;
+  color: #cbb58e;
+  min-width: 44px;
+  text-align: right;
+}
+
+.diff-group {
+  display: flex;
+  gap: 4px;
+}
+
+.diff-group .btn-small {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  font-size: 10px;
+}
+
+.diff-group .btn-small.active {
+  background: #332013;
+  border-color: #f2da91;
+  color: #f2da91;
 }
 
 /* ==================== ЦЕНТРАЛЬНОЕ УВЕДОМЛЕНИЕ ==================== */

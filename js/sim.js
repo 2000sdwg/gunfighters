@@ -24,13 +24,17 @@
 
   function getPlayers(state) {
     if (!state) return [];
-    if (state.players) return Object.values(state.players).filter(Boolean);
+    if (G.getPlayersList) return G.getPlayersList(state);
     return state.player ? [state.player] : [];
   }
 
   function isLocalPlayer(state, p) {
     if (!p || !state || !state.localPlayerId) return true;
     return p.id === state.localPlayerId;
+  }
+
+  function isPlayerGod(state, p) {
+    return !!(G.CFG && G.CFG.godMode && isLocalPlayer(state, p));
   }
 
   function showToastFor(state, p, text, dur) {
@@ -51,6 +55,37 @@
   function getWeapon(state, player) {
     const p = resolvePlayer(state, player);
     return G.WEAPONS[(p && p.weaponIdx) || 0];
+  }
+
+  function getWeaponById(id) {
+    for (let i = 0; i < G.WEAPONS.length; i++) {
+      if (G.WEAPONS[i].id === id) return G.WEAPONS[i];
+    }
+    return G.WEAPONS[0];
+  }
+
+  function getBotDiff() {
+    if (G.getBotDiffProfile) return G.getBotDiffProfile();
+    return (G.BOT_DIFFICULTY && G.BOT_DIFFICULTY.medium) || {
+      id: 'medium', reactMult: 1.0, dodgeSkill: 0.65, spreadMult: 1.0, tacticalCover: 0.78, avoidFriendlyFire: 0.55, shootCooldownMult: 1.0
+    };
+  }
+
+  function stepAimSpring(actor, angleKey, targetAngle, wDef, dt, rateScale) {
+    const scale = rateScale !== undefined ? rateScale : 1.0;
+    const inertia = (G.CFG.phys && G.CFG.phys.inertia) || 1.0;
+    const springMul = ((G.CFG.phys && G.CFG.phys.spring) || 1.0) * scale;
+    const wt = Math.max(0.3, wDef.weight || 1.0);
+    const effK = ((wDef.springK || 162) / (wt * inertia)) * springMul;
+    const effDamp = ((wDef.damping || 15.2) / Math.sqrt(wt * inertia)) / Math.sqrt(Math.max(0.25, springMul));
+    actor.aimVel = actor.aimVel || 0;
+    const subDt = dt * 0.5;
+    for (let s = 0; s < 2; s++) {
+      const diff = G.MATH.angleDiff(actor[angleKey] || 0, targetAngle);
+      const acc = diff * effK - actor.aimVel * effDamp;
+      actor.aimVel += acc * subDt;
+      actor[angleKey] = G.MATH.normAngle((actor[angleKey] || 0) + actor.aimVel * subDt);
+    }
   }
 
   function getWState(state, player) {
@@ -288,16 +323,18 @@
   // Резкий отскок / уклонение бандита перпендикулярно линии огня
   function triggerBanditDodge(t, threatDx, threatDy, state, world) {
     if (!t || !t.alive || t.isDodging || (t.dodgeCooldown || 0) > 0) return;
+    const diff = getBotDiff();
+    if (diff.dodgeSkill < 1 && Math.random() > diff.dodgeSkill) return;
     const len = Math.hypot(threatDx, threatDy) || 1;
     const ndx = threatDx / len;
     const ndy = threatDy / len;
     const side = Math.random() < 0.5 ? 1 : -1;
     const px = -ndy * side;
     const py = ndx * side;
-    const spd = 175;
+    const spd = 175 * (0.85 + 0.20 * (diff.dodgeSkill || 0.65));
     t.isDodging = true;
     t.dodgeTimer = 0.26;
-    t.dodgeCooldown = 2.6;
+    t.dodgeCooldown = 2.6 * (diff.reactMult || 1.0);
     t.dodgeDx = px * spd;
     t.dodgeDy = py * spd;
     t.inCover = false;
@@ -325,35 +362,40 @@
     }
   }
 
-  function checkBarrelWallCollision(player, weapon, world) {
-    const pos = getRenderPos(player);
-    const a = player.aimAngle;
+  function checkBarrelWallCollision(actor, weapon, world) {
+    const pos = (actor.aimAngle !== undefined) ? getRenderPos(actor) : actor;
+    const a = (actor.aimAngle !== undefined) ? actor.aimAngle : (actor.angle || 0);
     const dx = Math.cos(a);
     const dy = Math.sin(a);
     const rx = -dy;
     const ry = dx;
 
-    // Ствол поднимается ТОЛЬКО у ВЫСОКИХ преград (high: true).
-    // Низкие преграды не блокируют ствол, если игрок стоит.
     const segments = world.raiseSegments;
-    const ignoreId = (player.inCover && player.peeking && player.coverObj && !player.coverObj.high)
-      ? player.coverObj.id
+    const ignoreId = (actor.inCover && actor.peeking && actor.coverObj && !actor.coverObj.high)
+      ? actor.coverObj.id
       : null;
 
-    const maxCheck = weapon.wallCheckLen + 5;
-    const origins = [
-      { x: pos.x + rx * 4.2, y: pos.y + ry * 4.2, len: maxCheck },
-      { x: pos.x + rx * 1.2, y: pos.y + ry * 1.2, len: maxCheck - 1 }
-    ];
-
+    const maxCheck = (weapon.wallCheckLen || 21) + 5;
     let bestHit = null;
-    for (let i = 0; i < origins.length; i++) {
-      const o = origins[i];
-      const limit = bestHit ? Math.min(o.len, bestHit.dist) : o.len;
+    for (let i = 0; i < 2; i++) {
+      const off = i === 0 ? 4.2 : 1.2;
+      const baseLen = i === 0 ? maxCheck : (maxCheck - 1);
+      const ox = pos.x + rx * off;
+      const oy = pos.y + ry * off;
+      const limit = bestHit ? Math.min(baseLen, bestHit.dist) : baseLen;
+      const ex = ox + dx * limit;
+      const ey = oy + dy * limit;
+      const rMinX = ox < ex ? ox : ex;
+      const rMaxX = ox > ex ? ox : ex;
+      const rMinY = oy < ey ? oy : ey;
+      const rMaxY = oy > ey ? oy : ey;
       for (let s = 0; s < segments.length; s++) {
         const seg = segments[s];
         if (ignoreId && seg.id === ignoreId) continue;
-        const hit = G.MATH.raySegment(o.x, o.y, dx, dy, limit, seg.x1, seg.y1, seg.x2, seg.y2);
+        if (seg.maxX !== undefined && (seg.maxX < rMinX || seg.minX > rMaxX || seg.maxY < rMinY || seg.minY > rMaxY)) {
+          continue;
+        }
+        const hit = G.MATH.raySegment(ox, oy, dx, dy, limit, seg.x1, seg.y1, seg.x2, seg.y2);
         if (hit && (!bestHit || hit.dist < bestHit.dist)) {
           bestHit = hit;
         }
@@ -572,14 +614,15 @@
   function pickSpawnForPlayer(state, world, p) {
     const playersList = getPlayers(state);
     const idx = Math.max(0, playersList.indexOf(p));
+    const lay = (world && world.layout) || G.WORLD_LAYOUT;
     if (state && state.mpMode === 'pvp' && playersList.length > 1) {
-      const pvpPoints = [
-        { x: 150, y: 360 },
-        { x: 840, y: 360 },
-        { x: 205, y: 660 },
-        { x: 1110, y: 360 },
-        { x: 1840, y: 290 },
-        { x: 2510, y: 240 }
+      const pvpPoints = (lay && lay.pvpPoints) || [
+        { x: 215, y: 400 },
+        { x: 1040, y: 415 },
+        { x: 210, y: 745 },
+        { x: 1550, y: 415 },
+        { x: 2280, y: 345 },
+        { x: 2950, y: 265 }
       ];
       let best = pvpPoints[idx % pvpPoints.length];
       let bestScore = -1;
@@ -598,9 +641,10 @@
       }
       return best;
     }
+    const baseSp = (lay && lay.playerSpawn) || { x: 215, y: 400 };
     return {
-      x: 150 + (idx % 3) * 22,
-      y: 360 + (idx > 0 ? ((idx % 2 === 1 ? -1 : 1) * 26) : 0)
+      x: baseSp.x + (idx % 3) * 24,
+      y: baseSp.y + (idx > 0 ? ((idx % 2 === 1 ? -1 : 1) * 28) : 0)
     };
   }
 
@@ -639,6 +683,10 @@
     p.bandages = 2;
     p.drinking = false;
     p.drinkTimer = 0;
+    p.stunTimer = 0;
+    p.knockVx = 0;
+    p.knockVy = 0;
+    p.mountedHorse = false;
     if (isLocalPlayer(state, p)) {
       state.bloodTrail = state.bloodTrail || [];
       state.hatMenuOpen = false;
@@ -824,7 +872,7 @@
   function openReload(state, world, player) {
     const p = resolvePlayer(state, player);
     interruptSmoking(state, p);
-    if (p.rolling || p.bandaging || p.drinking || (isLocalPlayer(state, p) && state.editor && state.editor.active)) return;
+    if ((p.stunTimer || 0) > 0 || p.rolling || p.bandaging || p.drinking || (isLocalPlayer(state, p) && state.editor && state.editor.active)) return;
     const w = getWeapon(state, p);
     const ws = getWState(state, p);
     ensureChambers(w, ws);
@@ -997,7 +1045,7 @@
   function tryCock(state, world, player) {
     const p = resolvePlayer(state, player);
     interruptSmoking(state, p);
-    if (p.rolling) return;
+    if ((p.stunTimer || 0) > 0 || p.rolling) return;
     const w = getWeapon(state, p);
     const ws = getWState(state, p);
 
@@ -1043,26 +1091,56 @@
     }
   }
 
+  const _doorSegBuf = [];
+  const _losQueryBuf = [];
+  const _bulletQueryBuf = [];
+
   function getDoorSegments(world) {
-    const out = [];
-    if (!world || !world.doors) return out;
-    for (let i = 0; i < world.doors.length; i++) {
-      const d = world.doors[i];
-      const ang = d.baseAngle + d.angle;
-      out.push({
-        id: 'door_' + i,
-        mat: 'wood',
-        type: 'door',
-        high: false,
-        doorIdx: i,
-        door: d,
-        x1: d.hingeX,
-        y1: d.hingeY,
-        x2: d.hingeX + Math.cos(ang) * d.len,
-        y2: d.hingeY + Math.sin(ang) * d.len
-      });
+    if (!world || !world.doors) {
+      _doorSegBuf.length = 0;
+      return _doorSegBuf;
     }
-    return out;
+    const doors = world.doors;
+    _doorSegBuf.length = doors.length;
+    for (let i = 0; i < doors.length; i++) {
+      const d = doors[i];
+      const ang = d.baseAngle + d.angle;
+      const x1 = d.hingeX;
+      const y1 = d.hingeY;
+      const x2 = x1 + Math.cos(ang) * d.len;
+      const y2 = y1 + Math.sin(ang) * d.len;
+      let seg = _doorSegBuf[i];
+      if (!seg) {
+        seg = {
+          id: 'door_' + i,
+          mat: 'wood',
+          type: 'door',
+          high: false,
+          doorIdx: i,
+          door: d,
+          x1: x1,
+          y1: y1,
+          x2: x2,
+          y2: y2,
+          minX: 0,
+          maxX: 0,
+          minY: 0,
+          maxY: 0
+        };
+        _doorSegBuf[i] = seg;
+      } else {
+        seg.door = d;
+        seg.x1 = x1;
+        seg.y1 = y1;
+        seg.x2 = x2;
+        seg.y2 = y2;
+      }
+      seg.minX = x1 < x2 ? x1 : x2;
+      seg.maxX = x1 > x2 ? x1 : x2;
+      seg.minY = y1 < y2 ? y1 : y2;
+      seg.maxY = y1 > y2 ? y1 : y2;
+    }
+    return _doorSegBuf;
   }
 
   function rayExitRect(hx, hy, dx, dy, rect) {
@@ -1176,6 +1254,113 @@
     return occ;
   }
 
+  function hasHighWallBetween(x1, y1, x2, y2, world) {
+    if (!world) return false;
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.hypot(dx, dy);
+    if (len <= 8) return false;
+    const ndx = dx / len;
+    const ndy = dy / len;
+    const rayLen = len - 6;
+    const ex = x1 + ndx * rayLen;
+    const ey = y1 + ndy * rayLen;
+    const rMinX = x1 < ex ? x1 : ex;
+    const rMaxX = x1 > ex ? x1 : ex;
+    const rMinY = y1 < ey ? y1 : ey;
+    const rMaxY = y1 > ey ? y1 : ey;
+    const segs = world.queryWallSegments
+      ? world.queryWallSegments(rMinX, rMinY, rMaxX, rMaxY, _losQueryBuf)
+      : world.wallSegments;
+    for (let i = 0; i < segs.length; i++) {
+      const seg = segs[i];
+      if (!seg.high) continue;
+      if (seg.maxX !== undefined && (seg.maxX < rMinX || seg.minX > rMaxX || seg.maxY < rMinY || seg.minY > rMaxY)) {
+        continue;
+      }
+      if (G.MATH.raySegment(x1, y1, ndx, ndy, rayLen, seg.x1, seg.y1, seg.x2, seg.y2)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function notifyBanditsOfShot(state, world, shotX, shotY, echoHits, shooter) {
+    if (!world || !world.targets) return;
+    const sx = shooter ? shooter.x : shotX;
+    const sy = shooter ? shooter.y : shotY;
+
+    for (let i = 0; i < world.targets.length; i++) {
+      const t = world.targets[i];
+      if (t.kind !== 'bandit' || !t.alive) continue;
+      if (t.aiState === 'flee' || t.aiState === 'no_ammo_retreat') {
+        t.aimTimer = 0;
+        t.telegraphFrac = 0;
+        t.aimState = t.aiState;
+        continue;
+      }
+      if (t.aiState === 'combat') continue;
+
+      const dShot = G.MATH.dist(shotX, shotY, t.x, t.y);
+      if (dShot > 620) continue;
+
+      const blocked = hasHighWallBetween(shotX, shotY, t.x, t.y, world);
+      if (!blocked || dShot < 120) {
+        t.aiState = 'alert';
+        t.alertTimer = 3.5;
+        t.alertAngle = Math.atan2(sy - t.y, sx - t.x);
+        t.lastKnownX = sx;
+        t.lastKnownY = sy;
+        t.distractedByEcho = false;
+        continue;
+      }
+
+      // Стрелок скрыт высокой преградой: ищем слышимое ботом отражение эха (>= 45 px от стрелка)
+      let bestEcho = null;
+      let bestEx = 0;
+      let bestEy = 0;
+      let bestScore = Infinity;
+      if (echoHits && echoHits.length > 0) {
+        for (let hi = 0; hi < echoHits.length; hi++) {
+          const h = echoHits[hi];
+          if (G.MATH.dist(h.x, h.y, shotX, shotY) < 45) continue;
+          const ex = h.x - h.dx * 14;
+          const ey = h.y - h.dy * 14;
+          const dBot = G.MATH.dist(t.x, t.y, ex, ey);
+          if (dBot > 580) continue;
+          if (hasHighWallBetween(t.x, t.y, ex, ey, world)) continue;
+          const matBonus = h.mat === 'rock' ? 45 : (h.mat === 'wood' ? 12 : 0);
+          const sc = dBot - matBonus;
+          if (sc < bestScore) {
+            bestScore = sc;
+            bestEcho = h;
+            bestEx = ex;
+            bestEy = ey;
+          }
+        }
+      }
+
+      if (bestEcho) {
+        bestEcho.distracted = true;
+        if (state && state.debugRays && bestEcho.rayIdx !== undefined && state.debugRays[bestEcho.rayIdx]) {
+          state.debugRays[bestEcho.rayIdx].echoDistracted = true;
+        }
+        t.aiState = 'search';
+        t.searchTimer = 4.6 + Math.random() * 1.6;
+        t.searchRole = 'hunt';
+        t.lastKnownX = bestEx;
+        t.lastKnownY = bestEy;
+        t.alertAngle = Math.atan2(bestEy - t.y, bestEx - t.x);
+        t.distractedByEcho = true;
+      } else if (dShot < 360) {
+        t.aiState = 'alert';
+        t.alertTimer = 2.6;
+        t.alertAngle = Math.atan2(sy - t.y, sx - t.x) + G.MATH.rand(-0.45, 0.45);
+        t.distractedByEcho = false;
+      }
+    }
+  }
+
   function executeShot(state, world, player) {
     const p = resolvePlayer(state, player);
     const w = getWeapon(state, p);
@@ -1250,7 +1435,7 @@
 
     spawnIndoorGunSmoke(state, world, muzzle.x, muzzle.y, w.id, shotAngle);
     if ((w.id === 'walker' || w.id === 'winchester') && world.getIndoorZoneAt && world.getIndoorZoneAt(muzzle.x, muzzle.y)) {
-      p.indoorRingTimer = Math.max(p.indoorRingTimer || 0, w.id === 'walker' ? 2.4 : 1.7);
+      p.indoorRingTimer = Math.max(p.indoorRingTimer || 0, w.id === 'walker' ? 1.0 : 0.7);
     }
 
     const recoilMult = G.CFG.phys.recoil;
@@ -1312,31 +1497,35 @@
       }
     }
 
-    // Акустическая реакция бандитов на звук выстрела
-    for (let i = 0; i < world.targets.length; i++) {
-      const t = world.targets[i];
-      if (t.kind !== 'bandit' || !t.alive) continue;
-      if (t.aiState === 'flee') {
-        t.aimTimer = 0;
-        t.telegraphFrac = 0;
-        t.aimState = 'flee';
-        continue;
-      }
-      const dShot = G.MATH.dist(muzzle.x, muzzle.y, t.x, t.y);
-      if (dShot < 580 && (t.aiState === 'patrol' || t.aiState === 'search' || t.aiState === 'alert')) {
-        t.aiState = 'alert';
-        t.alertTimer = 3.5;
-        t.alertAngle = Math.atan2(p.y - t.y, p.x - t.x);
-        t.lastKnownX = p.x;
-        t.lastKnownY = p.y;
-      }
+    // Акустическая реакция бандитов на выстрел и отражения эха
+    const echoRes = (G.AUDIO && G.AUDIO.computeAcousticEcho)
+      ? G.AUDIO.computeAcousticEcho(muzzle.x, muzzle.y, world, state)
+      : null;
+    if (echoRes && isLocalPlayer(state, p)) {
+      state.debugRays = echoRes.raysVis;
+      state.echoDesc = echoRes.envLabel;
+    }
+    notifyBanditsOfShot(state, world, muzzle.x, muzzle.y, echoRes ? echoRes.hits : null, p);
+
+    const inZoneShot = world.getIndoorZoneAt && world.getIndoorZoneAt(muzzle.x, muzzle.y);
+    if (world.flushBirdFlocksNear) {
+      world.flushBirdFlocksNear(muzzle.x, muzzle.y, inZoneShot ? 190 : 300, state);
+    }
+    if (world.scareSheepNear) {
+      world.scareSheepNear(muzzle.x, muzzle.y, inZoneShot ? 160 : 250, state);
+    }
+    if (p.mountedHorse && world.horse && world.horse.riderId === p.id) {
+      scareHorse(state, world, muzzle.x, muzzle.y, 16, true);
+    } else {
+      scareHorse(state, world, muzzle.x, muzzle.y, 22, false);
     }
 
     const listener = resolvePlayer(state);
     G.AUDIO.playShot(w, muzzle.x, muzzle.y, world, state, {
       skipHudUpdate: !isLocalPlayer(state, p),
       listenerX: listener ? listener.x : muzzle.x,
-      listenerY: listener ? listener.y : muzzle.y
+      listenerY: listener ? listener.y : muzzle.y,
+      precomputedEcho: echoRes
     });
     pushNetEvent(state, { kind: 'shot', soundType: w.soundType || w.id, x: muzzle.x, y: muzzle.y, ang: shotAngle, weaponId: w.id, playerId: p.id });
   }
@@ -1348,7 +1537,7 @@
     const w = getWeapon(state, p);
     const ws = getWState(state, p);
 
-    if (p.rolling || p.bandaging || p.drinking || (isLocalPlayer(state, p) && state.editor && state.editor.active)) return;
+    if ((p.stunTimer || 0) > 0 || p.rolling || p.bandaging || p.drinking || (isLocalPlayer(state, p) && state.editor && state.editor.active)) return;
 
     if (ws.reloading) {
       closeReload(state, p);
@@ -1415,11 +1604,15 @@
 
   function findNearestInteractable(state, world, player) {
     const p = resolvePlayer(state, player);
-    if (!world || !world.interactables || !state || !p || p.dead) return null;
+    if (!world || !state || !p || p.dead) return null;
+    if (p.mountedHorse && world.horse && world.horse.state !== 'dead' && world.horse.riderId === p.id) {
+      return { id: 'horse_1', kind: 'horse_dismount', x: world.horse.x, y: world.horse.y, label: 'СЛЕЗТЬ С ЛОШАДИ', r: 48 };
+    }
     let best = null;
     let bestDist = Infinity;
-    for (let i = 0; i < world.interactables.length; i++) {
-      const it = world.interactables[i];
+    const list = world.interactables || [];
+    for (let i = 0; i < list.length; i++) {
+      const it = list[i];
       if (!isInteractableAvailable(state, it)) continue;
       const rad = it.r || 42;
       const d = G.MATH.dist(p.x, p.y, it.x, it.y);
@@ -1428,14 +1621,136 @@
         best = it;
       }
     }
+    const hr = world.horse;
+    if (!p.mountedHorse && hr && hr.state !== 'dead' && hr.state !== 'bucking' && hr.state !== 'stampede' && !hr.riderId) {
+      const dh = G.MATH.dist(p.x, p.y, hr.x, hr.y);
+      if (dh <= 44 && dh < bestDist) {
+        best = { id: hr.id || 'horse_1', kind: 'horse', x: hr.x, y: hr.y, label: 'СЕСТЬ НА ЛОШАДЬ', r: 44 };
+      }
+    }
     return best;
+  }
+
+  function mountHorse(state, world, player) {
+    const p = resolvePlayer(state, player);
+    const hr = world && world.horse;
+    if (!p || p.dead || !hr || hr.state === 'dead') return false;
+    if ((p.stunTimer || 0) > 0 || p.rolling || p.bandaging || p.drinking) return false;
+    if (hr.riderId && hr.riderId !== p.id) {
+      showToastFor(state, p, 'ЛОШАДЬ УЖЕ ЗАНЯТА', 1.0);
+      return false;
+    }
+    if (hr.state === 'bucking' || hr.state === 'stampede') {
+      showToastFor(state, p, 'ЛОШАДЬ ВЗБЕСИЛАСЬ!', 1.0);
+      return false;
+    }
+    exitCover(state, p);
+    interruptSmoking(state, p);
+    p.mountedHorse = true;
+    p.vx = 0;
+    p.vy = 0;
+    p.x = hr.x;
+    p.y = hr.y;
+    hr.tied = false;
+    hr.riderId = p.id;
+    hr.state = 'ridden';
+    if (G.AUDIO && G.AUDIO.playHoofbeat) G.AUDIO.playHoofbeat(world.getSurfaceAt(hr.x, hr.y));
+    showToastFor(state, p, 'ВЕРХОМ • [WASD] ГАЛОП • [E] СЛЕЗТЬ', 1.6);
+    return true;
+  }
+
+  function dismountHorse(state, world, player, thrown, throwAng) {
+    const p = resolvePlayer(state, player);
+    const hr = world && world.horse;
+    if (!p || !p.mountedHorse) return false;
+    p.mountedHorse = false;
+    const baseAng = throwAng !== undefined ? throwAng : ((hr ? hr.angle : 0) - Math.PI * 0.5);
+    const distOff = thrown ? 44 : 18;
+    if (hr) {
+      p.x = G.MATH.clamp(hr.x + Math.cos(baseAng) * distOff, 34, world.width - 34);
+      p.y = G.MATH.clamp(hr.y + Math.sin(baseAng) * distOff, 26, world.height - 26);
+      if (hr.riderId === p.id) hr.riderId = null;
+      if (hr.state === 'ridden') {
+        hr.state = hr.tied ? 'tied' : 'idle';
+        hr.vx = 0;
+        hr.vy = 0;
+        hr.speed = 0;
+      }
+    }
+    if (world && world.solids) {
+      for (let i = 0; i < world.solids.length; i++) {
+        const res = G.MATH.circleRectPush(p.x, p.y, G.CFG.playerRadius + 1, world.solids[i]);
+        if (res.hit) {
+          p.x = res.x;
+          p.y = res.y;
+        }
+      }
+    }
+    if (thrown) {
+      if (!isPlayerGod(state, p)) {
+        p.stunTimer = Math.max(p.stunTimer || 0, 0.6);
+      }
+      p.vx = 0;
+      p.vy = 0;
+      spawnFloatText(state, p.x, p.y - 12, 'СБРОШЕН!', getPal().barnRed ? getPal().barnRed[0] : '#a83c2e', true);
+    } else {
+      showToastFor(state, p, 'СПЕШИЛСЯ', 0.9);
+    }
+    return true;
+  }
+
+  function scareHorse(state, world, sx, sy, amount, isRiderShot) {
+    const hr = world && world.horse;
+    if (!hr || hr.state === 'dead') return;
+    const dist = G.MATH.dist(sx, sy, hr.x, hr.y);
+    const maxRange = isRiderShot ? 60 : ((world.getIndoorZoneAt && world.getIndoorZoneAt(sx, sy)) ? 170 : 270);
+    if (dist > maxRange) return;
+    const falloff = isRiderShot ? 1.0 : G.MATH.clamp(1.15 - dist / (maxRange * 1.15), 0.35, 1.0);
+    hr.calm = Math.max(0, (hr.calm !== undefined ? hr.calm : 100) - amount * falloff);
+    hr.calmRegenDelay = 3.0;
+    const P = getPal();
+
+    if (hr.calm <= 45 && (hr._neighCd || 0) <= 0) {
+      hr._neighCd = 1.6;
+      if (G.AUDIO && G.AUDIO.playHorseNeigh) G.AUDIO.playHorseNeigh();
+    }
+
+    if (hr.calm <= 0) {
+      if (hr.state === 'tied' || hr.state === 'idle' || hr.state === 'grazing') {
+        hr.tied = false;
+        hr.state = 'stampede';
+        hr.stampedeTimer = 3.6;
+        hr.stampedeAngle = Math.atan2(hr.y - sy, hr.x - sx);
+        hr._neighCd = 2.0;
+        if (G.AUDIO && G.AUDIO.playHorseNeigh) G.AUDIO.playHorseNeigh();
+        if (state) spawnFloatText(state, hr.x, hr.y - 14, 'КОНЬ ПОНЁС!', (P.brass && P.brass[0]) || '#f2da91', true);
+      } else if (hr.state === 'ridden') {
+        hr.state = 'bucking';
+        hr.buckTimer = 0.65;
+        hr.buckThrowAngle = G.MATH.normAngle(hr.angle + Math.PI * 0.72);
+        hr.vx = 0;
+        hr.vy = 0;
+        hr.speed = 0;
+        hr._neighCd = 2.0;
+        if (G.AUDIO && G.AUDIO.playHorseNeigh) G.AUDIO.playHorseNeigh();
+        if (state) spawnFloatText(state, hr.x, hr.y - 16, 'КОНЬ ВЗБРЫКНУЛ!', (P.brass && P.brass[0]) || '#f2da91', true);
+      }
+    }
   }
 
   function tryInteract(state, world, player) {
     const p = resolvePlayer(state, player);
+    if (p && (p.stunTimer || 0) > 0) return false;
     const item = (isLocalPlayer(state, p) ? (state.nearInteractable || findNearestInteractable(state, world, p)) : findNearestInteractable(state, world, p));
     if (!item || !p) return false;
     const P = getPal();
+
+    if (item.kind === 'horse_dismount') {
+      return dismountHorse(state, world, p, false);
+    }
+    if (item.kind === 'horse') {
+      return mountHorse(state, world, p);
+    }
 
     if (item.kind === 'bourbon') {
       if (p.dead || p.rolling || p.drinking || p.bandaging) return false;
@@ -1536,8 +1851,9 @@
 
   function toggleEditorMode(state, world, forcedState) {
     if (!state.editor) {
-      state.editor = { active: false, tool: 'place', selectedType: 'crate', rotated: false, gridStep: 8, hoverSolidId: null, camX: state.camera.x, camY: state.camera.y };
+      state.editor = { active: false, tool: 'place', tab: 'objects', selectedType: 'crate', rotated: false, gridStep: 8, hoverSolidId: null, hoverEntity: null, camX: state.camera.x, camY: state.camera.y };
     }
+    if (!state.editor.tab) state.editor.tab = 'objects';
     const next = forcedState !== undefined ? !!forcedState : !state.editor.active;
     state.editor.active = next;
     state.input.lmb = false;
@@ -1552,6 +1868,7 @@
       showToast(state, 'РЕДАКТОР УРОВНЯ: БОЙ НА ПАУЗЕ (WASD — КАМЕРА)', 1.8);
     } else {
       state.editor.hoverSolidId = null;
+      state.editor.hoverEntity = null;
       showToast(state, 'БОЙ ВОЗОБНОВЛЁН', 1.2);
     }
   }
@@ -1578,6 +1895,7 @@
     }
 
     interruptSmoking(state, p);
+    if ((p.stunTimer || 0) > 0 && code !== 'KeyV') return;
     if (code === 'Digit1' || code === '__act:weapon_0') { switchWeapon(state, 0, p); return; }
     if (code === 'Digit2' || code === '__act:weapon_1') { switchWeapon(state, 1, p); return; }
     if (code === 'Digit3' || code === '__act:weapon_2') { switchWeapon(state, 2, p); return; }
@@ -1617,6 +1935,7 @@
 
     const isCoverKey = code === '__act:cover' || code === '__act:cover_roll' || G.matchesKey('cover', code);
     const isRollKey = code === '__act:roll' || code === '__act:cover_roll' || G.matchesKey('roll', code);
+    if ((isCoverKey || isRollKey) && p.mountedHorse) return;
     const keys = (inputOverride && inputOverride.keys) || (p.input && !isLocalPlayer(state, p) ? p.input.keys : state.input.keys) || {};
     const movingInput = !!(keys.KeyW || keys.KeyS || keys.KeyA || keys.KeyD ||
       keys.ArrowUp || keys.ArrowDown || keys.ArrowLeft || keys.ArrowRight);
@@ -1714,28 +2033,175 @@
     return best;
   }
 
+  function checkFriendlyInLine(shooterB, ang, maxRange, targets) {
+    if (!targets) return false;
+    const dx = Math.cos(ang);
+    const dy = Math.sin(ang);
+    for (let i = 0; i < targets.length; i++) {
+      const other = targets[i];
+      if (other.kind !== 'bandit' || !other.alive || other.id === shooterB.id) continue;
+      const ox = other.x - shooterB.x;
+      const oy = other.y - shooterB.y;
+      const proj = ox * dx + oy * dy;
+      if (proj <= 4 || proj >= maxRange) continue;
+      const perp2 = ox * ox + oy * oy - proj * proj;
+      const safeR = (other.r || 11) + 7;
+      if (perp2 <= safeR * safeR) return true;
+    }
+    return false;
+  }
+
+  function stepBanditWeaponState(state, world, t, wDef, diff, dt, listener, hasLos, dist) {
+    if (t.ammo === undefined) t.ammo = wDef.capacity || 6;
+    if (t.maxAmmo === undefined) t.maxAmmo = wDef.capacity || 6;
+    if (t.reserveAmmo === undefined) t.reserveAmmo = wDef.id === 'winchester' ? 16 : 18;
+    if (t.cocked === undefined) t.cocked = true;
+
+    if (t.flashTimer > 0) t.flashTimer = Math.max(0, t.flashTimer - dt);
+    if (t.recoilKickAnim > 0) t.recoilKickAnim = Math.max(0, t.recoilKickAnim - dt * 6.5);
+    if (t.daCooldownTimer > 0) t.daCooldownTimer = Math.max(0, t.daCooldownTimer - dt);
+    if (t.shootCooldown > 0) t.shootCooldown = Math.max(0, t.shootCooldown - dt);
+    if (t._ffCheckCd > 0) t._ffCheckCd = Math.max(0, t._ffCheckCd - dt);
+    t.bloom = Math.max(0, (t.bloom || 0) - (wDef.bloomDecay || 0.13) * dt);
+    t.reloadOpenFrac = G.MATH.lerp(t.reloadOpenFrac || 0, t.reloading ? 1 : 0, Math.min(1, dt * 12));
+
+    const lx = listener ? listener.x : t.x;
+    const ly = listener ? listener.y : t.y;
+    const reactMult = diff.reactMult || 1.0;
+
+    if (t.cockTimer > 0) {
+      t.cockTimer = Math.max(0, t.cockTimer - dt);
+      if (wDef.action === 'lever' && t.chamberSpent && !t.leverEjected && t.cockTimer <= (t.cockDuration || 0.36) * 0.50) {
+        t.leverEjected = true;
+        spawnShell(state, t.x, t.y, (t.angle || 0) + Math.PI * 0.45, 0.95);
+      }
+      if (t.cockTimer === 0) {
+        t.chamberSpent = false;
+        if (t.ammo > 0) t.cocked = true;
+      }
+    }
+
+    if (t.reloading) {
+      t.reloadTimer = (t.reloadTimer || 0) - dt;
+      if (t.reloadTimer <= 0) {
+        if (t.ammo < t.maxAmmo && t.reserveAmmo > 0) {
+          t.ammo += 1;
+          t.reserveAmmo -= 1;
+          if (G.AUDIO && G.AUDIO.playBanditReloadClick) {
+            G.AUDIO.playBanditReloadClick('insert', t.x, t.y, lx, ly);
+          }
+          if (t.ammo < t.maxAmmo && t.reserveAmmo > 0) {
+            t.reloadTimer = (wDef.reloadOneTime || 0.22) * reactMult;
+          }
+        }
+        if (t.ammo >= t.maxAmmo || t.reserveAmmo <= 0) {
+          t.reloading = false;
+          t.reloadTimer = 0;
+          if (G.AUDIO && G.AUDIO.playBanditReloadClick) {
+            G.AUDIO.playBanditReloadClick('close', t.x, t.y, lx, ly);
+          }
+          if (wDef.action === 'da') t.cocked = true;
+        }
+      } else if (hasLos && dist < 85 && t.ammo >= 2 && wDef.action === 'da') {
+        t.reloading = false;
+        t.reloadTimer = 0;
+        t.cocked = true;
+      }
+    }
+
+    if (!t.reloading && t.ammo <= 0 && t.reserveAmmo <= 0) {
+      if (t.aiState !== 'no_ammo_retreat') {
+        t.aiState = 'no_ammo_retreat';
+        t.noAmmoFlee = true;
+        t.retreatScroungeTimer = 4.5;
+        t.fleeTimer = 0;
+        t.inCover = false;
+        t.peeking = false;
+        t.aimTimer = 0;
+        t.telegraphFrac = 0;
+        t.aimState = 'no_ammo_retreat';
+        if (!t.outOfAmmoAnnounced) {
+          t.outOfAmmoAnnounced = true;
+          const P = getPal();
+          spawnFloatText(state, t.x, t.y - 14, 'ПУСТО!', (P.brass && P.brass[0]) || '#f2da91', true);
+        }
+      }
+      return false;
+    }
+
+    const wantTacReload = !hasLos && t.aiState === 'combat' && t.ammo <= Math.floor(t.maxAmmo * 0.4) && dist > 130;
+    if (!t.reloading && t.reserveAmmo > 0 && (t.ammo <= 0 || wantTacReload)) {
+      t.reloading = true;
+      t.cockTimer = 0;
+      t.peeking = false;
+      t.aimTimer = 0;
+      t.telegraphFrac = 0;
+      t.reloadTimer = (wDef.reloadOneTime || 0.22) * reactMult;
+      if (G.AUDIO && G.AUDIO.playBanditReloadClick) {
+        G.AUDIO.playBanditReloadClick('open', t.x, t.y, lx, ly);
+      }
+      if (wDef.uiShape === 'cylinder') {
+        const spent = Math.max(0, t.maxAmmo - t.ammo);
+        for (let sc = 0; sc < Math.min(3, spent); sc++) {
+          spawnShell(state, t.x, t.y, (t.angle || 0) - Math.PI * 0.45, 0.75);
+        }
+      }
+    }
+
+    if (!t.reloading && t.ammo > 0 && (wDef.action === 'sa' || wDef.action === 'lever') && !t.cocked && t.cockTimer <= 0 && t.shootCooldown <= 0.15) {
+      t.cockDuration = (wDef.cockTime || 0.22) * reactMult;
+      t.cockTimer = t.cockDuration;
+      t.leverEjected = false;
+    }
+    return true;
+  }
+
+  function isBanditOnPlayerScreen(t, p, state) {
+    const pad = 6;
+    if (p && isLocalPlayer(state, p) && state.viewRect && state.viewRect.w > 0 && state.viewRect.h > 0) {
+      const vr = state.viewRect;
+      return t.x >= vr.x + pad && t.x <= vr.x + vr.w - pad && t.y >= vr.y + pad && t.y <= vr.y + vr.h - pad;
+    }
+    if (!p) return false;
+    const vw = (state.viewRect && state.viewRect.w > 0) ? state.viewRect.w : 480;
+    const vh = (state.viewRect && state.viewRect.h > 0) ? state.viewRect.h : 270;
+    const rx = p.x - vw * 0.5;
+    const ry = p.y - vh * 0.5;
+    return t.x >= rx + pad && t.x <= rx + vw - pad && t.y >= ry + pad && t.y <= ry + vh - pad;
+  }
+
   function updateBanditCombat(state, world, dt) {
     if (G.CFG.spawnBandits === false) return;
     const alivePlayers = getPlayers(state).filter((pl) => pl && !pl.dead && (pl.hp === undefined || pl.hp > 0));
     if (alivePlayers.length === 0) return;
     const listener = resolvePlayer(state);
+    const diff = getBotDiff();
 
     for (let i = 0; i < world.targets.length; i++) {
       const t = world.targets[i];
       if (t.kind !== 'bandit' || !t.alive) continue;
-      if (t.aiState === 'flee') {
+      const wDef = getWeaponById(t.weaponId || (t.gunType === 'rifle' ? 'winchester' : 'walker'));
+
+      if ((t.stunTimer || 0) > 0) {
         t.aimTimer = 0;
         t.telegraphFrac = 0;
-        t.aimState = 'flee';
+        t.aimState = 'stun';
+        if (t.flashTimer > 0) t.flashTimer = Math.max(0, t.flashTimer - dt);
+        if (t.recoilKickAnim > 0) t.recoilKickAnim = Math.max(0, t.recoilKickAnim - dt * 6.5);
         continue;
       }
 
-      if (t.shootCooldown > 0) {
-        t.shootCooldown = Math.max(0, t.shootCooldown - dt);
+      if (t.aiState === 'flee' || t.aiState === 'no_ammo_retreat') {
+        t.aimTimer = 0;
+        t.telegraphFrac = 0;
+        t.aimState = t.aiState;
+        if (t.flashTimer > 0) t.flashTimer = Math.max(0, t.flashTimer - dt);
+        if (t.recoilKickAnim > 0) t.recoilKickAnim = Math.max(0, t.recoilKickAnim - dt * 6.5);
+        continue;
       }
 
       // Выбираем ближайшего видимого (или просто ближайшего) живого игрока
-      const baseSight = t.sightDist || (t.gunType === 'rifle' ? 480 : 420);
+      const baseSight = t.sightDist || (wDef.id === 'winchester' ? 480 : 420);
       const stormInt = (state.dustStorm && state.dustStorm.active) ? (state.dustStorm.intensity || 0) : 0;
       let targetP = alivePlayers[0];
       let targetDist = Infinity;
@@ -1762,20 +2228,11 @@
             : (fovDiff <= Math.PI * 0.45 || cdist < 72);
 
         let cLos = (cdist <= effSight && cdist > 8 && inFov);
-        if (cLos) {
-          const ndx = cdx / cdist;
-          const ndy = cdy / cdist;
-          for (let sIdx = 0; sIdx < world.wallSegments.length; sIdx++) {
-            const seg = world.wallSegments[sIdx];
-            if (!seg.high) continue;
-            if (G.MATH.raySegment(t.x, t.y, ndx, ndy, cdist - 6, seg.x1, seg.y1, seg.x2, seg.y2)) {
-              cLos = false;
-              break;
-            }
-          }
-          if (cLos && getSmokeOcclusionAlongRay(t.x, t.y, cand.x, cand.y, state) >= 0.70) {
-            cLos = false;
-          }
+        if (cLos && hasHighWallBetween(t.x, t.y, cand.x, cand.y, world)) {
+          cLos = false;
+        }
+        if (cLos && getSmokeOcclusionAlongRay(t.x, t.y, cand.x, cand.y, state) >= 0.70) {
+          cLos = false;
         }
         const score = (cLos ? 0 : 2500) + cdist;
         if (score < bestScore) {
@@ -1794,59 +2251,73 @@
       const angToP = targetAngToP;
       const hasLos = targetHasLos;
 
+      if (!stepBanditWeaponState(state, world, t, wDef, diff, dt, listener, hasLos, dist)) {
+        t.fleeTarget = world.pickFleePoint ? world.pickFleePoint(t, alivePlayers) : null;
+        continue;
+      }
+
+      const wallHit = checkBarrelWallCollision(t, wDef, world);
+      t.wallBlocked = !!wallHit;
+      t.wallHitDist = wallHit ? wallHit.dist : ((wDef.wallCheckLen || 21) + 5);
+
       if (hasLos) {
         t.aiState = 'combat';
         t.lastKnownX = p.x;
         t.lastKnownY = p.y;
+        t.distractedByEcho = false;
 
-        // Тактическое позиционирование и укрытия в бою
+        // Тактическое позиционирование и укрытия в бою (учитывает сложность и перезарядку)
+        const allowTacCover = t.reloading || (diff.tacticalCover || 0.78) >= 0.99 || (t.id % 100) / 100 < (diff.tacticalCover || 0.78);
+        let movingToCover = false;
         if (!t.isDodging) {
-          const covInfo = findBestBanditCover(t, p, world);
+          const covInfo = allowTacCover ? findBestBanditCover(t, p, world) : null;
           if (covInfo) {
             const dCov = G.MATH.dist(t.x, t.y, covInfo.sx, covInfo.sy);
             if (dCov > 10) {
+              movingToCover = true;
               t.inCover = false;
               t.peeking = false;
               t.coverObj = covInfo.cover;
-              const spd = 54;
+              const spd = t.reloading ? 64 : 54;
               t.x += ((covInfo.sx - t.x) / dCov) * spd * dt;
               t.y += ((covInfo.sy - t.y) / dCov) * spd * dt;
               t.walkPhase += dt * 4.8;
             } else {
               t.inCover = true;
               t.coverObj = covInfo.cover;
-              if (!covInfo.cover.high) {
-                // За низким укрытием приседает на паузе и выглядывает на выстрел
-                t.peeking = (t.shootCooldown <= 0.68);
+              if (t.reloading) {
+                t.peeking = false;
+              } else if (!covInfo.cover.high) {
+                t.peeking = (t.shootCooldown <= 0.68 && t.ammo > 0);
               } else {
-                t.peeking = (t.shootCooldown <= 0.72);
+                t.peeking = (t.shootCooldown <= 0.72 && t.ammo > 0);
               }
             }
           } else {
             t.inCover = false;
             t.peeking = false;
             t.coverObj = null;
-            // Умеренное маневрирование на открытой позиции
-            const prefDist = t.gunType === 'rifle' ? 280 : 175;
-            if (dist < prefDist - 40) {
-              t.x -= (dx / dist) * 32 * dt;
-              t.y -= (dy / dist) * 32 * dt;
-              t.walkPhase += dt * 3.2;
+            const prefDist = wDef.id === 'winchester' ? 280 : (wDef.id === 'lightning' ? 125 : 180);
+            if (t.reloading || dist < prefDist - 40) {
+              t.x -= (dx / Math.max(1, dist)) * 34 * dt;
+              t.y -= (dy / Math.max(1, dist)) * 34 * dt;
+              t.walkPhase += dt * 3.4;
             } else if (dist > prefDist + 75) {
-              t.x += (dx / dist) * 36 * dt;
-              t.y += (dy / dist) * 36 * dt;
+              t.x += (dx / Math.max(1, dist)) * 36 * dt;
+              t.y += (dy / Math.max(1, dist)) * 36 * dt;
               t.walkPhase += dt * 3.5;
             }
           }
         }
 
-        // Реакция на прицел игрока: если игрок держит бандита на мушке, бандит отскакивает
+        // Реакция на прицел игрока (учитывает diff.reactMult и dodgeSkill)
         const angPToB = Math.atan2(t.y - p.y, t.x - p.x);
         const underPlayerAim = !p.rolling && !p.wallBlocked && (!p.inCover || p.peeking)
           && dist < 390 && Math.abs(G.MATH.angleDiff(p.aimAngle, angPToB)) < 0.115;
+        const reactGate = 0.34 * (diff.reactMult || 1.0);
         if (underPlayerAim && !t.isDodging && (t.dodgeCooldown || 0) <= 0) {
           t.aimReactTimer = (t.aimReactTimer || 0) + dt;
-          if (t.aimReactTimer > 0.34) {
+          if (t.aimReactTimer > reactGate) {
             t.aimReactTimer = 0;
             triggerBanditDodge(t, dx, dy, state, world);
           }
@@ -1854,101 +2325,173 @@
           t.aimReactTimer = Math.max(0, (t.aimReactTimer || 0) - dt * 2.0);
         }
 
-        // Прицеливание и стрельба (раненая рука замедляет наводку и сильно расширяет разброс)
-        const canShootStance = (!t.inCover || t.peeking) && !t.isDodging;
+        // Прицеливание с пружинной физикой оружия + защита от Friendly Fire + запрет стрельбы из-за экрана
+        const onScreen = isBanditOnPlayerScreen(t, p, state);
+        if (!onScreen && !t.isDodging && !movingToCover && !t.reloading && !t.inCover && dist > 110) {
+          t.x += (dx / Math.max(1, dist)) * 34 * dt;
+          t.y += (dy / Math.max(1, dist)) * 34 * dt;
+          t.walkPhase += dt * 3.4;
+        }
+        const canShootStance = (!t.inCover || t.peeking) && !t.isDodging && !t.reloading;
         if (canShootStance && dist <= (t.shootRange || 420)) {
-          t.aimState = 'aim';
-          const rotRate = t.armWounded ? 3.8 : 6.5;
-          t.angle = G.MATH.normAngle(t.angle + G.MATH.angleDiff(t.angle, angToP) * Math.min(1, dt * rotRate));
-          t.aimTimer = (t.aimTimer || 0) + dt * (t.armWounded ? 0.62 : 1.0);
-          const telegTime = t.telegraphTime || 0.55;
-          t.telegraphFrac = G.MATH.clamp(t.aimTimer / telegTime, 0, 1);
+          t.aimState = t.reloading ? 'reload' : 'aim';
+          t.targetAngle = angToP;
+          const armRate = (t.armWounded ? 0.58 : 1.0) / Math.max(0.7, diff.reactMult || 1.0);
+          stepAimSpring(t, 'angle', angToP, wDef, dt, armRate);
 
-          if (t.aimTimer >= telegTime && t.shootCooldown <= 0) {
-            t.aimTimer = 0;
+          if (t.wallBlocked) {
+            t.x -= Math.cos(t.angle) * 28 * dt;
+            t.y -= Math.sin(t.angle) * 28 * dt;
+          }
+
+          if (!onScreen) {
+            t.aimTimer = Math.max(0, (t.aimTimer || 0) - dt * 3.0);
             t.telegraphFrac = 0;
-            const isRifle = t.gunType === 'rifle';
-            t.shootCooldown = isRifle ? 1.75 : 1.3;
+          } else {
+            t.aimTimer = (t.aimTimer || 0) + dt * (t.armWounded ? 0.62 : 1.0);
+            const telegTime = (t.telegraphTime || 0.55) * (diff.reactMult || 1.0);
+            t.telegraphFrac = G.MATH.clamp(t.aimTimer / telegTime, 0, 1);
 
-            // Меткость бота из настроек (+ штраф за ранение руки в 2.4–2.7 раза)
-            const acc = G.MATH.clamp(
-              G.CFG.botAccuracy !== undefined ? G.CFG.botAccuracy : 0.55,
-              0, 1
-            );
-            const distFactor = 0.85 + G.MATH.clamp(dist / 480, 0, 1) * 0.55;
-            const armPenalty = t.armWounded ? (t.armWoundLevel > 1 ? 2.75 : 2.45) : 1.0;
-            const errRad = G.MATH.lerp(0.34, 0.010, acc) * distFactor * armPenalty * G.MATH.rand(0.65, 1.25);
-            const bAngle = t.angle + G.MATH.rand(-errRad, errRad);
-            const bdx = Math.cos(bAngle);
-            const bdy = Math.sin(bAngle);
-            const muzzleX = t.x + bdx * 14;
-            const muzzleY = t.y + bdy * 14;
+            // Проверка линии огня на своих (Friendly Fire avoidance — только в фазе готовности выстрела)
+            let friendlyBlocking = false;
+            let avoidFF = false;
+            if (t.aimTimer >= telegTime * 0.5 && t.shootCooldown <= 0.25) {
+              const ffRange = Math.min(dist, wDef.falloffEnd || 420);
+              friendlyBlocking = checkFriendlyInLine(t, t.angle, ffRange, world.targets);
+              if (friendlyBlocking) {
+                if (diff.avoidFriendlyFire === true) {
+                  avoidFF = true;
+                } else if (typeof diff.avoidFriendlyFire === 'number' && diff.avoidFriendlyFire > 0) {
+                  if ((t._ffCheckCd || 0) <= 0) {
+                    t._ffCheckCd = 0.55;
+                    t._ffDecision = Math.random() < diff.avoidFriendlyFire;
+                  }
+                  avoidFF = !!t._ffDecision;
+                }
+              }
+            }
+            if (avoidFF && !t.isDodging && !movingToCover) {
+              const sideSign = (t.id % 2 === 0) ? 1 : -1;
+              t.x += -Math.sin(t.angle) * sideSign * 44 * dt;
+              t.y += Math.cos(t.angle) * sideSign * 44 * dt;
+              t.walkPhase += dt * 3.8;
+              t.aimTimer = Math.min(t.aimTimer, telegTime * 0.85);
+            }
 
-            G.AUDIO.playShot(
-              { soundType: isRifle ? 'winchester' : 'walker' },
-              muzzleX,
-              muzzleY,
-              world,
-              state,
-              { isEnemy: true, skipHudUpdate: true, listenerX: listener ? listener.x : p.x, listenerY: listener ? listener.y : p.y }
-            );
-            pushNetEvent(state, { kind: 'shot', soundType: isRifle ? 'winchester' : 'walker', x: muzzleX, y: muzzleY, ang: bAngle, isEnemy: true });
+            const readyAction = (wDef.action === 'da' || t.cocked) && t.cockTimer <= 0 && t.daCooldownTimer <= 0;
+            if (t.aimTimer >= telegTime && t.shootCooldown <= 0 && !t.wallBlocked && t.ammo > 0 && readyAction && !avoidFF) {
+              t.aimTimer = 0;
+              t.telegraphFrac = 0;
+              t.ammo = Math.max(0, t.ammo - 1);
+              if (wDef.action === 'sa') {
+                t.cocked = false;
+              } else if (wDef.action === 'lever') {
+                t.cocked = false;
+                t.chamberSpent = true;
+                t.leverEjected = false;
+              } else if (wDef.action === 'da') {
+                t.daCooldownTimer = wDef.daCooldown || 0.40;
+              }
 
-            state.bullets.push({
-              owner: 'bandit',
-              shooterId: t.id,
-              x: muzzleX,
-              y: muzzleY,
-              px: muzzleX,
-              py: muzzleY,
-              startX: muzzleX,
-              startY: muzzleY,
-              dx: bdx,
-              dy: bdy,
-              speed: isRifle ? 860 : 700,
-              damage: isRifle ? 26 : 18,
-              traveled: 0,
-              falloffStart: 200,
-              falloffEnd: 450,
-              falloffMinMult: 0.7,
-              weaponId: isRifle ? 'winchester' : 'walker',
-              maxPenetrations: isRifle ? 2 : 1,
-              penetrations: 0,
-              penetratedIds: [],
-              ricochets: 0,
-              ricocheted: false,
-              canHitOwner: false,
-              justRicochetedId: null,
-              originCoverId: (t.inCover && t.peeking && t.coverObj && !t.coverObj.high) ? t.coverObj.id : null,
-              life: 1.2
-            });
+              const baseCooldown = wDef.id === 'winchester' ? 1.60 : (wDef.id === 'lightning' ? 0.85 : 1.25);
+              t.shootCooldown = baseCooldown * (diff.shootCooldownMult || 1.0);
 
-            spawnIndoorGunSmoke(state, world, muzzleX, muzzleY, isRifle ? 'winchester' : 'walker', bAngle);
+              const acc = G.MATH.clamp(G.CFG.botAccuracy !== undefined ? G.CFG.botAccuracy : 0.55, 0, 1);
+              const distFactor = 0.85 + G.MATH.clamp(dist / 480, 0, 1) * 0.55;
+              const armPenalty = t.armWounded ? (t.armWoundLevel > 1 ? 2.60 : 2.25) : 1.0;
+              const swingPen = Math.min(0.10, Math.abs(t.aimVel || 0) * 0.018);
+              const dynSpread = ((wDef.baseSpread || 0.05) + (t.bloom || 0) + swingPen) * (diff.spreadMult || 1.0) * G.MATH.lerp(2.1, 0.65, acc) * distFactor * armPenalty;
+              t.spread = G.MATH.clamp(dynSpread, 0.012, wDef.maxSpread || 0.34);
 
-            spawnParticles(state, muzzleX, muzzleY, 6, {
-              baseAngle: bAngle,
-              spread: 0.45,
-              minSpeed: 45,
-              maxSpeed: 140,
-              minLife: 0.08,
-              maxLife: 0.22,
-              minSize: 1.5,
-              maxSize: 3.2,
-              colors: ['#fff4c7', '#e3c068', '#f58a38'],
-              kind: 'spark'
-            });
-            spawnShell(state, t.x, t.y, t.angle - Math.PI * 0.45, 0.85);
+              const tri = Math.random() + Math.random() - 1;
+              const bAngle = t.angle + tri * t.spread;
+              const bdx = Math.cos(bAngle);
+              const bdy = Math.sin(bAngle);
+              const muzzleX = t.x + bdx * Math.min(18, (wDef.barrelLen || 16) * 0.72);
+              const muzzleY = t.y + bdy * Math.min(18, (wDef.barrelLen || 16) * 0.72);
+
+              const recMult = (G.CFG.phys && G.CFG.phys.recoil) || 1.0;
+              const recDir = (Math.random() < 0.5 ? -1 : 1) * G.MATH.rand(0.75, 1.2);
+              t.aimVel = (t.aimVel || 0) + recDir * (wDef.recoilKick || 0.24) * recMult * 12.0;
+              t.bloom = Math.min(wDef.maxSpread || 0.30, (t.bloom || 0) + (wDef.bloomPerShot || 0.07));
+              t.recoilKickAnim = 1.0;
+              t.flashTimer = 0.06;
+
+              G.AUDIO.playShot(
+                { soundType: wDef.soundType || 'walker' },
+                muzzleX,
+                muzzleY,
+                world,
+                state,
+                { isEnemy: true, skipHudUpdate: true, listenerX: listener ? listener.x : p.x, listenerY: listener ? listener.y : p.y }
+              );
+              pushNetEvent(state, { kind: 'shot', soundType: wDef.soundType || 'walker', x: muzzleX, y: muzzleY, ang: bAngle, isEnemy: true });
+
+              const botDmg = wDef.id === 'winchester' ? 30 : (wDef.id === 'lightning' ? 15 : 22);
+              state.bullets.push({
+                owner: 'bandit',
+                shooterId: t.id,
+                x: muzzleX,
+                y: muzzleY,
+                px: muzzleX,
+                py: muzzleY,
+                startX: muzzleX,
+                startY: muzzleY,
+                dx: bdx,
+                dy: bdy,
+                speed: wDef.bulletSpeed || 860,
+                damage: botDmg,
+                traveled: 0,
+                falloffStart: wDef.falloffStart || 200,
+                falloffEnd: wDef.falloffEnd || 450,
+                falloffMinMult: wDef.falloffMinMult !== undefined ? wDef.falloffMinMult : 0.7,
+                weaponId: wDef.id,
+                maxPenetrations: wDef.penetration || 0,
+                penetrations: 0,
+                penetratedIds: [],
+                ricochets: 0,
+                ricocheted: false,
+                canHitOwner: false,
+                justRicochetedId: null,
+                originCoverId: (t.inCover && t.peeking && t.coverObj && !t.coverObj.high) ? t.coverObj.id : null,
+                life: 1.2
+              });
+
+              spawnIndoorGunSmoke(state, world, muzzleX, muzzleY, wDef.id, bAngle);
+              const inZoneB = world.getIndoorZoneAt && world.getIndoorZoneAt(muzzleX, muzzleY);
+              if (world.flushBirdFlocksNear) {
+                world.flushBirdFlocksNear(muzzleX, muzzleY, inZoneB ? 190 : 300, state);
+              }
+              if (world.scareSheepNear) {
+                world.scareSheepNear(muzzleX, muzzleY, inZoneB ? 160 : 250, state);
+              }
+              scareHorse(state, world, muzzleX, muzzleY, 20, false);
+              spawnParticles(state, muzzleX, muzzleY, 6, {
+                baseAngle: bAngle,
+                spread: 0.45,
+                minSpeed: 45,
+                maxSpeed: 140,
+                minLife: 0.08,
+                maxLife: 0.22,
+                minSize: 1.5,
+                maxSize: 3.2,
+                colors: ['#fff4c7', '#e3c068', '#f58a38'],
+                kind: 'spark'
+              });
+              if (wDef.action !== 'lever') {
+                // SA / DA оставляют стреляную гильзу до перезарядки (скоба Генри выбросит при взводе)
+              }
+            }
           }
         } else {
           t.aimTimer = Math.max(0, (t.aimTimer || 0) - dt * 2.5);
           t.telegraphFrac = 0;
-          t.aimState = (t.inCover && !t.peeking) ? 'cover' : 'combat';
+          t.aimState = t.reloading ? 'reload' : ((t.inCover && !t.peeking) ? 'cover' : 'combat');
           if (t.inCover && !t.peeking) {
-            t.angle = G.MATH.normAngle(t.angle + G.MATH.angleDiff(t.angle, angToP) * Math.min(1, dt * 4.0));
+            stepAimSpring(t, 'angle', angToP, wDef, dt, 0.7);
           }
         }
       } else {
-        // Разрыв прямой видимости: переход из боя в поиск по lastKnownPos
         if (t.aiState === 'combat') {
           t.aiState = 'search';
           t.searchTimer = 4.6 + Math.random() * 1.6;
@@ -1960,7 +2503,7 @@
         } else {
           t.aimTimer = Math.max(0, (t.aimTimer || 0) - dt * 2.0);
           t.telegraphFrac = 0;
-          t.aimState = t.aiState || 'patrol';
+          t.aimState = t.reloading ? 'reload' : (t.aiState || 'patrol');
         }
       }
     }
@@ -2005,20 +2548,35 @@
         let bestDist = remDist;
         let hitWall = null;
 
-        // Проверка сегментов стен/укрытий и подвижных дверей салуна
-        const segLists = [world.wallSegments, doorSegs];
+        // Проверка сегментов стен/укрытий (через Spatial Grid + AABB) и подвижных дверей салуна
+        const ex = b.x + b.dx * bestDist;
+        const ey = b.y + b.dy * bestDist;
+        const rMinX = b.x < ex ? b.x : ex;
+        const rMaxX = b.x > ex ? b.x : ex;
+        const rMinY = b.y < ey ? b.y : ey;
+        const rMaxY = b.y > ey ? b.y : ey;
+        const nearWalls = world.queryWallSegments
+          ? world.queryWallSegments(rMinX, rMinY, rMaxX, rMaxY, _bulletQueryBuf)
+          : world.wallSegments;
+
+        const segLists = [nearWalls, doorSegs];
         for (let lIdx = 0; lIdx < segLists.length; lIdx++) {
           const segs = segLists[lIdx];
           for (let sIdx = 0; sIdx < segs.length; sIdx++) {
             const seg = segs[sIdx];
+            if (seg.maxX !== undefined && (seg.maxX < rMinX || seg.minX > rMaxX || seg.maxY < rMinY || seg.minY > rMaxY)) {
+              continue;
+            }
             if (b.justRicochetedId && seg.id === b.justRicochetedId) continue;
             if (b.penetratedIds && b.penetratedIds.indexOf(seg.id) !== -1) continue;
+            if (seg.solid && (seg.solid.passThroughBullets || seg.solid.lowCoverPassThrough)) continue;
             // Игнорируем собственное низкое укрытие в первые 42 px полёта (огонь поверх кромки)
             if (b.originCoverId && seg.id === b.originCoverId && !b.ricocheted && (b.traveled || 0) < 42) continue;
             const h = G.MATH.raySegment(b.x, b.y, b.dx, b.dy, bestDist, seg.x1, seg.y1, seg.x2, seg.y2);
             if (h) {
               bestDist = h.dist;
-              hitWall = { ...h, seg: seg };
+              h.seg = seg;
+              hitWall = h;
             }
           }
         }
@@ -2055,7 +2613,6 @@
           const t = world.targets[tIdx];
           if (!t.alive) continue;
           if (t.kind === 'bandit') {
-            if (ownerType === 'bandit' && !b.canHitOwner) continue;
             if (t.id === b.shooterId && !b.canHitOwner) continue;
           }
           const ox = t.x - b.x;
@@ -2076,6 +2633,123 @@
           }
         }
 
+        // Проверка попадания в лошадь (если жива и не принадлежит стреляющему всаднику)
+        let hitHorse = false;
+        const hr = world.horse;
+        if (hr && hr.state !== 'dead') {
+          const sameRiderShot = (ownerType === 'player' && b.ownerId && b.ownerId === hr.riderId && !b.ricocheted && (b.traveled || 0) < 28);
+          if (!sameRiderShot) {
+            const hox = hr.x - b.x;
+            const hoy = hr.y - b.y;
+            const hproj = hox * b.dx + hoy * b.dy;
+            if (hproj >= 0 && hproj <= bestDist) {
+              const hperp2 = hox * hox + hoy * hoy - hproj * hproj;
+              const hrad = (hr.r || 13) + 2;
+              if (hperp2 <= hrad * hrad) {
+                bestDist = hproj;
+                hitHorse = true;
+                hitTarget = null;
+                hitPlayerObj = null;
+                hitWall = null;
+              }
+            }
+          }
+        }
+
+        // Проверка попадания в овец в загоне
+        let hitSheep = null;
+        if (world.sheep && world.sheep.length) {
+          for (let sIdx = 0; sIdx < world.sheep.length; sIdx++) {
+            const sh = world.sheep[sIdx];
+            if (!sh || !sh.alive) continue;
+            const sox = sh.x - b.x;
+            const soy = sh.y - b.y;
+            const sproj = sox * b.dx + soy * b.dy;
+            if (sproj >= 0 && sproj <= bestDist) {
+              const sperp2 = sox * sox + soy * soy - sproj * sproj;
+              const srad = (sh.r || 8) + 1;
+              if (sperp2 <= srad * srad) {
+                bestDist = sproj;
+                hitSheep = sh;
+                hitHorse = false;
+                hitTarget = null;
+                hitPlayerObj = null;
+                hitWall = null;
+              }
+            }
+          }
+        }
+
+        if (hitSheep) {
+          const sx = b.x + b.dx * bestDist;
+          const sy = b.y + b.dy * bestDist;
+          const hitCalc = calcBulletDamage(b, bestDist);
+          const dmg = hitCalc.dmg;
+          hitSheep.hp = Math.max(0, (hitSheep.hp || 40) - dmg);
+          hitSheep.hitFlash = 0.16;
+          G.AUDIO.playImpact('flesh');
+          pushNetEvent(state, { kind: 'impact', mat: 'flesh', x: sx, y: sy });
+          spawnParticles(state, sx, sy, 8, {
+            baseAngle: Math.atan2(b.dy, b.dx),
+            spread: 1.2,
+            minSpeed: 22,
+            maxSpeed: 88,
+            minLife: 0.25,
+            maxLife: 0.55,
+            minSize: 1.4,
+            maxSize: 2.8,
+            drag: 5.5,
+            colors: [P.cloud ? P.cloud[0] : '#e8e3d5', P.cloud ? P.cloud[1] : '#cfc8b6', P.cloud ? P.cloud[2] : '#a8a293'],
+            alpha: 0.92,
+            kind: 'debris'
+          });
+          spawnBloodBurst(state, sx, sy, b.dx, b.dy, dmg, hitSheep.hp <= 0);
+          if (hitSheep.hp <= 0) {
+            hitSheep.alive = false;
+            hitSheep.vx = 0;
+            hitSheep.vy = 0;
+            addDecal(state, hitSheep.x, hitSheep.y, 7, P.blood ? P.blood[2] : '#6e100c');
+          } else {
+            hitSheep.state = 'flee';
+            hitSheep.stateTimer = 2.6;
+            hitSheep.fleeAngle = Math.atan2(b.dy, b.dx) + G.MATH.rand(-0.5, 0.5);
+            if (G.AUDIO && G.AUDIO.playSheepBleat) {
+              const lp = resolvePlayer(state);
+              G.AUDIO.playSheepBleat(hitSheep.x, hitSheep.y, lp ? lp.x : hitSheep.x, lp ? lp.y : hitSheep.y);
+            }
+          }
+          aliveBullet = false;
+          break;
+        }
+
+        if (hitHorse && hr) {
+          const hx = b.x + b.dx * bestDist;
+          const hy = b.y + b.dy * bestDist;
+          const hitCalc = calcBulletDamage(b, bestDist);
+          const dmg = hitCalc.dmg;
+          hr.hp = Math.max(0, (hr.hp || 150) - dmg);
+          hr.hitFlash = 0.14;
+          G.AUDIO.playImpact('flesh');
+          pushNetEvent(state, { kind: 'impact', mat: 'flesh', x: hx, y: hy });
+          spawnBloodBurst(state, hx, hy, b.dx, b.dy, dmg, hr.hp <= 0);
+          spawnFloatText(state, hr.x, hr.y - 12, `ЛОШАДЬ -${dmg}`, P.blood[0], false);
+          scareHorse(state, world, hx, hy, 38, false);
+          if (hr.hp <= 0) {
+            hr.state = 'dead';
+            hr.tied = false;
+            hr.vx = 0;
+            hr.vy = 0;
+            hr.speed = 0;
+            if (hr.riderId && state.players && state.players[hr.riderId]) {
+              dismountHorse(state, world, state.players[hr.riderId], true, b.dy >= 0 ? -Math.PI * 0.5 : Math.PI * 0.5);
+            }
+            hr.riderId = null;
+            spawnFloatText(state, hr.x, hr.y - 18, 'ЛОШАДЬ ПАЛА!', P.blood[0], true);
+          }
+          aliveBullet = false;
+          break;
+        }
+
         if (hitPlayerObj) {
           const p = hitPlayerObj;
           const bx0 = b.startX !== undefined ? b.startX : b.px;
@@ -2094,15 +2768,44 @@
             continue;
           }
           if (protectedByCover) {
+            const canPierce = !!(pcObj.breached && (b.penetrations || 0) < (b.maxPenetrations || 0));
             const mat = p.coverObj.mat || 'wood';
             const ix = b.x + b.dx * bestDist;
             const iy = b.y + b.dy * bestDist;
             G.AUDIO.playImpact(mat === 'hay' ? 'wood' : mat);
+            pushNetEvent(state, { kind: 'impact', mat: mat === 'hay' ? 'wood' : mat, x: ix, y: iy });
             spawnCoverImpact(state, ix, iy, mat, Math.atan2(-b.dy, -b.dx));
             if (world.damageSolid) world.damageSolid(p.coverObj, b.damage || 18, ix, iy, b.dx, b.dy, state, b.weaponId);
             if (mat === 'water' && (p.coverObj.waterLevel || 0) > 0) {
               addWaterRipple(state, p.coverObj.id, ix, iy, 9, 0.6);
             }
+            if (!canPierce) {
+              aliveBullet = false;
+              break;
+            }
+            b.penetrations = (b.penetrations || 0) + 1;
+            b.damage = Math.max(4, Math.round(b.damage * 0.60));
+            if (!b.penetratedIds) b.penetratedIds = [];
+            b.penetratedIds.push(pcObj.id);
+          }
+
+          if (isPlayerGod(state, p)) {
+            p.hp = Math.max(p.hp || 100, p.maxHp || 100);
+            p.critical = false;
+            p.bleeding = false;
+            p.stunTimer = 0;
+            spawnParticles(state, p.x, p.y, 4, {
+              baseAngle: Math.atan2(-b.dy, -b.dx),
+              spread: 0.9,
+              minSpeed: 30,
+              maxSpeed: 80,
+              minLife: 0.08,
+              maxLife: 0.18,
+              minSize: 1.2,
+              maxSize: 2.0,
+              colors: [P.brass ? P.brass[0] : '#f2da91', '#ffffff'],
+              kind: 'spark'
+            });
             aliveBullet = false;
             break;
           }
@@ -2145,7 +2848,18 @@
         if (hitTarget) {
           const hx = b.x + b.dx * bestDist;
           const hy = b.y + b.dy * bestDist;
-          const attacker = (ownerType === 'player' && b.ownerId && state.players && state.players[b.ownerId]) || resolvePlayer(state);
+          const attacker = (ownerType === 'player')
+            ? ((b.ownerId && state.players && state.players[b.ownerId]) || resolvePlayer(state))
+            : null;
+          let shooterBandit = null;
+          if (ownerType === 'bandit' && b.shooterId && world.targets) {
+            for (let si = 0; si < world.targets.length; si++) {
+              if (world.targets[si].id === b.shooterId) {
+                shooterBandit = world.targets[si];
+                break;
+              }
+            }
+          }
 
           if (hitTarget.kind === 'bandit') {
             const bx0 = b.startX !== undefined ? b.startX : b.px;
@@ -2156,25 +2870,41 @@
             const bCovValid = bcObj && !bcObj.high && !bWaterEmpty && !bAlreadyPierced;
             const banditProtected = hitTarget.inCover && !hitTarget.peeking && bCovValid && segmentCrossesRect(bx0, by0, hitTarget.x, hitTarget.y, bcObj);
             if (banditProtected) {
+              const canPierce = !!(bcObj.breached && (b.penetrations || 0) < (b.maxPenetrations || 0));
               const mat = hitTarget.coverObj.mat || 'wood';
               G.AUDIO.playImpact(mat === 'hay' ? 'wood' : mat);
+              pushNetEvent(state, { kind: 'impact', mat: mat === 'hay' ? 'wood' : mat, x: hx, y: hy });
               spawnCoverImpact(state, hx, hy, mat, Math.atan2(-b.dy, -b.dx));
               if (world.damageSolid) world.damageSolid(hitTarget.coverObj, b.damage || 22, hx, hy, b.dx, b.dy, state, b.weaponId);
               if (mat === 'water' && (hitTarget.coverObj.waterLevel || 0) > 0) {
                 addWaterRipple(state, hitTarget.coverObj.id, hx, hy, 9, 0.6);
               }
-              aliveBullet = false;
-              break;
+              if (!canPierce) {
+                aliveBullet = false;
+                break;
+              }
+              b.penetrations = (b.penetrations || 0) + 1;
+              b.damage = Math.max(4, Math.round(b.damage * 0.60));
+              if (!b.penetratedIds) b.penetratedIds = [];
+              b.penetratedIds.push(bcObj.id);
             }
 
             hitTarget.hitFlash = 0.14;
             hitTarget.wobble = 1.0;
 
-            if (hitTarget.aiState !== 'combat' && hitTarget.aiState !== 'flee' && attacker) {
-              hitTarget.aiState = 'combat';
-              hitTarget.lastKnownX = attacker.x;
-              hitTarget.lastKnownY = attacker.y;
-              hitTarget.angle = Math.atan2(attacker.y - hitTarget.y, attacker.x - hitTarget.x);
+            if (hitTarget.aiState !== 'combat' && hitTarget.aiState !== 'flee' && hitTarget.aiState !== 'no_ammo_retreat') {
+              const reactTarget = attacker || shooterBandit;
+              if (reactTarget) {
+                if (attacker) {
+                  hitTarget.aiState = 'combat';
+                  hitTarget.lastKnownX = attacker.x;
+                  hitTarget.lastKnownY = attacker.y;
+                } else {
+                  hitTarget.aiState = 'alert';
+                  hitTarget.alertTimer = 2.5;
+                }
+                hitTarget.angle = Math.atan2(reactTarget.y - hitTarget.y, reactTarget.x - hitTarget.x);
+              }
             }
 
             const hitCalc = calcBulletDamage(b, bestDist);
@@ -2193,12 +2923,12 @@
 
             G.AUDIO.playImpact('flesh');
             pushNetEvent(state, { kind: 'impact', mat: 'flesh', x: hx, y: hy });
-            if (!attacker || isLocalPlayer(state, attacker)) triggerHitConfirm(state, isFatal);
+            if (attacker && isLocalPlayer(state, attacker)) triggerHitConfirm(state, isFatal);
 
             const knock = (isFatal ? 165 : 85) * G.MATH.clamp(dealt / 55, 0.5, 1.7);
             hitTarget.knockVx = (hitTarget.knockVx || 0) + b.dx * knock;
             hitTarget.knockVy = (hitTarget.knockVy || 0) + b.dy * knock;
-            if (!attacker || isLocalPlayer(state, attacker)) {
+            if (attacker && isLocalPlayer(state, attacker)) {
               state.camera.shakeMag = Math.max(state.camera.shakeMag, isFatal ? 3.5 : 1.5);
             }
             spawnBloodBurst(state, hx, hy, b.dx, b.dy, dealt, isFatal);
@@ -2212,7 +2942,7 @@
               hitTarget.fallAngle = Math.atan2(b.dy, b.dx) + G.MATH.rand(-0.35, 0.35);
               spawnFlyingHat(state, hitTarget.x, hitTarget.y, b.dx, b.dy, hitTarget.hatColor, hitTarget.hatBand);
               if (attacker) attacker.kills = (attacker.kills || 0) + 1;
-              if ((!attacker || isLocalPlayer(state, attacker)) && G.addKill) {
+              if (attacker && isLocalPlayer(state, attacker) && G.addKill) {
                 const unlockedHats = G.addKill(1);
                 if (unlockedHats && unlockedHats.length > 0) {
                   const lastH = unlockedHats[unlockedHats.length - 1];
@@ -2224,19 +2954,20 @@
               const col = isArmHit ? P.canyon[0] : (hitCalc.mult < 0.8 ? P.woodPale[0] : P.grass[0]);
               spawnFloatText(state, hitTarget.x, hitTarget.y - 2, lbl, col, false);
 
-              if (hitTarget.aiState !== 'flee' && !hitTarget.fledOnce && !hitTarget.isReinforcement && (state.fleeCooldown || 0) <= 0) {
+              if (hitTarget.aiState !== 'flee' && hitTarget.aiState !== 'no_ammo_retreat' && !hitTarget.fledOnce && !hitTarget.isReinforcement && (state.fleeCooldown || 0) <= 0) {
                 let anyFleeing = false;
                 for (let fIdx = 0; fIdx < world.targets.length; fIdx++) {
                   const ft = world.targets[fIdx];
-                  if (ft.kind === 'bandit' && ft.alive && ft.aiState === 'flee') {
+                  if (ft.kind === 'bandit' && ft.alive && ft.aiState === 'flee' && !ft.noAmmoFlee) {
                     anyFleeing = true;
                     break;
                   }
                 }
-                const fleeChance = hitTarget.hp < hitTarget.maxHp * 0.40 ? 0.12 : 0.04;
+                const fleeChance = hitTarget.hp < hitTarget.maxHp * 0.35 ? 0.05 : 0;
                 if (!anyFleeing && Math.random() < fleeChance) {
-                  state.fleeCooldown = 25.0;
+                  state.fleeCooldown = 65.0;
                   hitTarget.aiState = 'flee';
+                  hitTarget.noAmmoFlee = false;
                   hitTarget.fledOnce = true;
                   hitTarget.fleeTimer = 5.5;
                   hitTarget.fleeTarget = world.pickFleePoint ? world.pickFleePoint(hitTarget, playersList) : null;
@@ -2268,42 +2999,6 @@
               colors: [P.cloud[0], P.glass[0]], alpha: 0.70, kind: 'debris'
             });
             addDecal(state, hitTarget.x, hitTarget.y, 5, 'rgba(77, 112, 117, 0.42)', { kind: 'glasspool' });
-          } else if (hitTarget.kind === 'steel') {
-            G.AUDIO.playImpact('metal');
-            pushNetEvent(state, { kind: 'impact', mat: 'metal', x: hx, y: hy });
-            triggerHitConfirm(state, false);
-            const sdx = hx - hitTarget.x;
-            const sdy = hy - hitTarget.y;
-            const slen = Math.hypot(sdx, sdy) || 1;
-            let snx = sdx / slen;
-            let sny = sdy / slen;
-            if (snx * b.dx + sny * b.dy > 0) { snx = -snx; sny = -sny; }
-            const cosInc = Math.abs(b.dx * snx + b.dy * sny);
-            spawnParticles(state, hx, hy, 12, {
-              baseAngle: Math.atan2(sny, snx), spread: 0.85, minSpeed: 75, maxSpeed: 195,
-              minLife: 0.12, maxLife: 0.28, minSize: 1.2, maxSize: 2.2,
-              colors: [P.brass[0], P.grass[0], '#ffffff'], kind: 'spark'
-            });
-            if (cosInc < 0.55 && (b.ricochets || 0) < 2) {
-              const dot = b.dx * snx + b.dy * sny;
-              b.dx -= 2 * dot * snx;
-              b.dy -= 2 * dot * sny;
-              const nlen = Math.hypot(b.dx, b.dy) || 1;
-              b.dx /= nlen; b.dy /= nlen;
-              b.x = hx + snx * 2.5;
-              b.y = hy + sny * 2.5;
-              b.damage = Math.max(4, Math.round(b.damage * 0.65));
-              b.speed = Math.round(b.speed * 0.80);
-              b.ricocheted = true;
-              b.ricochets = (b.ricochets || 0) + 1;
-              b.canHitOwner = true;
-              b.traveled = (b.traveled || 0) + bestDist;
-              remDist -= bestDist;
-              const ricLst = resolvePlayer(state);
-              if (G.AUDIO.playRicochet) G.AUDIO.playRicochet(hx, hy, ricLst ? ricLst.x : hx, ricLst ? ricLst.y : hy);
-              pushNetEvent(state, { kind: 'ricochet', x: hx, y: hy });
-              continue;
-            }
           } else {
             const hitCalc = calcBulletDamage(b, bestDist);
             hitTarget.hp -= hitCalc.dmg;
@@ -2659,6 +3354,13 @@
     for (let pi = 0; pi < playersList.length; pi++) {
       const p = playersList[pi];
       if (!p) continue;
+      if (isPlayerGod(state, p)) {
+        p.hp = p.maxHp || 100;
+        p.critical = false;
+        p.bleeding = false;
+        p.dead = false;
+        p.stunTimer = 0;
+      }
       if (p.dead) {
         p.concussion = 0;
         p.bandaging = false;
@@ -2694,7 +3396,7 @@
         p.indoorRingTimer = Math.max(0, p.indoorRingTimer - dt);
       }
       const baseCritConc = p.critical ? 0.78 : 0;
-      const roomRing = p.indoorRingTimer > 0 ? Math.min(0.65, p.indoorRingTimer * 0.34) : 0;
+      const roomRing = p.indoorRingTimer > 0 ? Math.min(0.22, p.indoorRingTimer * 0.18) : 0;
       const targetConc = Math.max(baseCritConc, roomRing);
       const rate = targetConc > (p.concussion || 0) ? 6.0 : 1.6;
       p.concussion = G.MATH.lerp(p.concussion || 0, targetConc, Math.min(1, dt * rate));
@@ -2823,8 +3525,9 @@
         }
         if (tw.x < -30 || tw.y > world.height + 20) {
           const respawned = spawnTumbleweed(world);
+          const maxTwY = (world.layout && world.layout.streetBot) ? world.layout.streetBot + 50 : 660;
           tw.x = world.width - G.MATH.rand(20, 120);
-          tw.y = G.MATH.rand(90, Math.min(world.height - 90, 560));
+          tw.y = G.MATH.rand(90, Math.min(world.height - 90, maxTwY));
           tw.speedScale = respawned.speedScale;
         }
       }
@@ -2893,6 +3596,213 @@
     }
   }
 
+  function updateHorse(state, world, dt) {
+    const hr = world && world.horse;
+    if (!hr) return;
+    const P = getPal();
+    if (hr.hitFlash > 0) hr.hitFlash = Math.max(0, hr.hitFlash - dt);
+    if (hr._neighCd > 0) hr._neighCd = Math.max(0, hr._neighCd - dt);
+    if (hr.trampleCooldowns) {
+      const tKeys = Object.keys(hr.trampleCooldowns);
+      for (let i = 0; i < tKeys.length; i++) {
+        const k = tKeys[i];
+        hr.trampleCooldowns[k] -= dt;
+        if (hr.trampleCooldowns[k] <= 0) delete hr.trampleCooldowns[k];
+      }
+    }
+
+    const rider = (hr.riderId && state.players && state.players[hr.riderId]) || null;
+    if (hr.state === 'dead') {
+      if (rider && rider.mountedHorse) dismountHorse(state, world, rider, false);
+      hr.riderId = null;
+      return;
+    }
+
+    if (hr.calmRegenDelay > 0) {
+      hr.calmRegenDelay = Math.max(0, hr.calmRegenDelay - dt);
+    } else if (hr.calm < (hr.maxCalm || 100)) {
+      hr.calm = Math.min(hr.maxCalm || 100, hr.calm + 10 * dt);
+    }
+
+    if (hr.state === 'bucking') {
+      hr.buckTimer = Math.max(0, (hr.buckTimer || 0) - dt);
+      hr.vx = 0;
+      hr.vy = 0;
+      hr.speed = 0;
+      hr.gallopPhase = (hr.gallopPhase || 0) + dt * 16;
+      if (Math.random() < 0.45) {
+        spawnParticles(state, hr.x, hr.y, 1, {
+          baseAngle: Math.random() * Math.PI * 2, spread: 1, minSpeed: 16, maxSpeed: 42,
+          minLife: 0.2, maxLife: 0.4, minSize: 1.5, maxSize: 2.8, drag: 4,
+          colors: [P.dirt[0], P.dirt[1]], alpha: 0.5, kind: 'smoke'
+        });
+      }
+      if (hr.buckTimer <= 0) {
+        if (rider && rider.mountedHorse) {
+          dismountHorse(state, world, rider, true, hr.buckThrowAngle);
+        }
+        hr.riderId = null;
+        hr.state = 'stampede';
+        hr.stampedeTimer = 3.2;
+        hr.stampedeAngle = G.MATH.normAngle((hr.angle || 0) + G.MATH.rand(-0.35, 0.35));
+      }
+      return;
+    }
+
+    if (hr.state === 'stampede') {
+      hr.stampedeTimer = Math.max(0, (hr.stampedeTimer || 0) - dt);
+      const stSpd = 220;
+      const sx = Math.cos(hr.stampedeAngle || 0) * stSpd;
+      const sy = Math.sin(hr.stampedeAngle || 0) * stSpd;
+      hr.vx = G.MATH.lerp(hr.vx || 0, sx, Math.min(1, dt * 8));
+      hr.vy = G.MATH.lerp(hr.vy || 0, sy, Math.min(1, dt * 8));
+      const nx = hr.x + hr.vx * dt;
+      const ny = hr.y + hr.vy * dt;
+      hr.x = nx;
+      hr.y = ny;
+
+      let bounced = false;
+      if (hr.x < 48) { hr.x = 48; hr.stampedeAngle = G.MATH.rand(-0.8, 0.8); bounced = true; }
+      else if (hr.x > world.width - 48) { hr.x = world.width - 48; hr.stampedeAngle = Math.PI + G.MATH.rand(-0.8, 0.8); bounced = true; }
+      if (hr.y < 36) { hr.y = 36; hr.stampedeAngle = Math.PI * 0.5 + G.MATH.rand(-0.6, 0.6); bounced = true; }
+      else if (hr.y > world.height - 36) { hr.y = world.height - 36; hr.stampedeAngle = -Math.PI * 0.5 + G.MATH.rand(-0.6, 0.6); bounced = true; }
+
+      for (let i = 0; i < world.solids.length; i++) {
+        const res = G.MATH.circleRectPush(hr.x, hr.y, hr.r || 13, world.solids[i]);
+        if (res.hit) {
+          hr.x = res.x;
+          hr.y = res.y;
+          if (!bounced) {
+            hr.stampedeAngle = G.MATH.normAngle(Math.atan2(res.ny, res.nx) + G.MATH.rand(-0.45, 0.45));
+            bounced = true;
+          }
+        }
+      }
+      hr.speed = Math.hypot(hr.vx, hr.vy);
+      if (hr.speed > 18) {
+        const moveAng = Math.atan2(hr.vy, hr.vx);
+        hr.angle = G.MATH.normAngle((hr.angle || 0) + G.MATH.angleDiff(hr.angle || 0, moveAng) * Math.min(1, dt * 10));
+      }
+      if (hr.stampedeTimer <= 0) {
+        hr.state = 'idle';
+        hr.vx = 0;
+        hr.vy = 0;
+        hr.speed = 0;
+        hr.calm = Math.max(hr.calm, 45);
+      }
+    } else if (hr.state !== 'ridden') {
+      hr.vx = 0;
+      hr.vy = 0;
+      hr.speed = 0;
+      hr.grazeTimer = (hr.grazeTimer || 0) - dt;
+      if (hr.grazeTimer <= 0) {
+        if (hr.state === 'grazing') {
+          hr.state = hr.tied ? 'tied' : 'idle';
+          hr.grazeTimer = G.MATH.rand(2.5, 5.0);
+        } else {
+          hr.state = 'grazing';
+          hr.grazeTimer = G.MATH.rand(1.8, 3.2);
+        }
+      }
+      if (hr.state === 'grazing') {
+        hr.grazePhase = (hr.grazePhase || 0) + dt * 4.5;
+      }
+    }
+
+    // Цокот копыт, пыль, вспугивание птиц и растаптывание на высокой скорости
+    const curSpd = hr.speed || 0;
+    if ((hr.state === 'ridden' || hr.state === 'stampede') && curSpd > 90) {
+      hr.gallopPhase = (hr.gallopPhase || 0) + dt * (curSpd * 0.085);
+      hr.stepTimer = (hr.stepTimer || 0) - dt;
+      if (hr.stepTimer <= 0) {
+        hr.stepTimer = G.MATH.clamp(0.42 - curSpd * 0.001, 0.19, 0.36);
+        const surf = world.getSurfaceAt(hr.x, hr.y);
+        const localP = resolvePlayer(state);
+        if (!localP || G.MATH.dist(hr.x, hr.y, localP.x, localP.y) < 520) {
+          if (G.AUDIO && G.AUDIO.playHoofbeat) G.AUDIO.playHoofbeat(surf);
+        }
+        spawnParticles(state, hr.x, hr.y, 3, {
+          baseAngle: Math.atan2(-hr.vy, -hr.vx), spread: 0.7, minSpeed: 12, maxSpeed: 34,
+          minLife: 0.18, maxLife: 0.38, minSize: 1.6, maxSize: 3.0, grow: 1.8, drag: 3.5,
+          colors: surf === 'water' ? [P.water[0], P.water[1]] : [P.dirt[0], P.dirt[1]], alpha: 0.45, kind: 'smoke'
+        });
+        if (curSpd > 140) {
+          if (world.flushBirdFlocksNear) world.flushBirdFlocksNear(hr.x, hr.y, 210, state);
+          if (world.scareSheepNear) world.scareSheepNear(hr.x, hr.y, 175, state);
+        }
+      }
+
+      if (curSpd > 155) {
+        const vxNorm = hr.vx / curSpd;
+        const vyNorm = hr.vy / curSpd;
+        for (let ti = 0; ti < world.targets.length; ti++) {
+          const t = world.targets[ti];
+          if (t.kind !== 'bandit' || !t.alive || (hr.trampleCooldowns && hr.trampleCooldowns[t.id])) continue;
+          if (G.MATH.dist(hr.x, hr.y, t.x, t.y) <= (hr.r || 13) + (t.r || 11)) {
+            hr.trampleCooldowns[t.id] = 0.85;
+            t.hp -= 35;
+            t.hurtTimer = 0.35;
+            t.hitFlash = 0.16;
+            t.wobble = 1.0;
+            t.stunTimer = Math.max(t.stunTimer || 0, 1.5);
+            t.aimTimer = 0;
+            t.telegraphFrac = 0;
+            t.reloading = false;
+            t.cockTimer = 0;
+            t.inCover = false;
+            t.peeking = false;
+            t.knockVx = (t.knockVx || 0) + vxNorm * 195;
+            t.knockVy = (t.knockVy || 0) + vyNorm * 195;
+            if (!t.hatless) {
+              t.hatless = true;
+              spawnFlyingHat(state, t.x, t.y, vxNorm, vyNorm, t.hatColor, t.hatBand);
+            }
+            if (G.AUDIO && G.AUDIO.playImpact) G.AUDIO.playImpact('flesh');
+            spawnBloodBurst(state, t.x, t.y, vxNorm, vyNorm, 35, t.hp <= 0);
+            spawnFloatText(state, t.x, t.y - 12, t.hp <= 0 ? 'ЗАТОПТАН!' : 'ОГЛУШЁН -35', P.blood[0], true);
+            if (t.hp <= 0) {
+              t.alive = false;
+              t.deathAnim = 0;
+              t.bloodPool = 0;
+              t.fallAngle = Math.atan2(vyNorm, vxNorm);
+              if (rider) {
+                rider.kills = (rider.kills || 0) + 1;
+                if (isLocalPlayer(state, rider)) {
+                  triggerHitConfirm(state, true);
+                  if (G.addKill) G.addKill(1);
+                }
+              }
+            }
+          }
+        }
+
+        if (state && state.mpMode === 'pvp') {
+          const playersList = getPlayers(state);
+          for (let pi = 0; pi < playersList.length; pi++) {
+            const op = playersList[pi];
+            if (!op || op.dead || op.mountedHorse || op.rolling || op.id === hr.riderId) continue;
+            if (isPlayerGod(state, op)) continue;
+            if (hr.trampleCooldowns && hr.trampleCooldowns[op.id]) continue;
+            if (G.MATH.dist(hr.x, hr.y, op.x, op.y) <= (hr.r || 13) + G.CFG.playerRadius + 2) {
+              hr.trampleCooldowns[op.id] = 0.85;
+              op.hp = Math.max(0, (op.hp || 100) - 35);
+              op.hurtTimer = 0.35;
+              op.stunTimer = Math.max(op.stunTimer || 0, 1.5);
+              op.knockVx = (op.knockVx || 0) + vxNorm * 185;
+              op.knockVy = (op.knockVy || 0) + vyNorm * 185;
+              if (G.AUDIO && G.AUDIO.playImpact) G.AUDIO.playImpact('flesh');
+              spawnBloodBurst(state, op.x, op.y, vxNorm, vyNorm, 35, op.hp <= 0);
+              spawnFloatText(state, op.x, op.y - 12, 'ОГЛУШЁН -35', P.blood[0], true);
+              if (op.hp <= 0 && rider) {
+                rider.kills = (rider.kills || 0) + 1;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   function updateSinglePlayer(state, world, p, input, dt) {
     if (!p) return null;
     const P = getPal();
@@ -2908,11 +3818,30 @@
     if (p.recoilKickAnim > 0) p.recoilKickAnim = Math.max(0, p.recoilKickAnim - dt * 6.5);
     if (p.rollCooldown > 0) p.rollCooldown = Math.max(0, p.rollCooldown - dt);
     if (p.hurtTimer > 0) p.hurtTimer = Math.max(0, p.hurtTimer - dt);
+    if (p.doorHitCd > 0) p.doorHitCd = Math.max(0, p.doorHitCd - dt);
+    if (p.stunTimer > 0) p.stunTimer = Math.max(0, p.stunTimer - dt);
+
+    if (Math.hypot(p.knockVx || 0, p.knockVy || 0) > 1) {
+      p.x += (p.knockVx || 0) * dt;
+      p.y += (p.knockVy || 0) * dt;
+      const kd = Math.exp(-10 * dt);
+      p.knockVx *= kd;
+      p.knockVy *= kd;
+    }
+
+    if (isPlayerGod(state, p)) {
+      p.hp = Math.max(p.hp || 100, p.maxHp || 100);
+      p.critical = false;
+      p.bleeding = false;
+      p.dead = false;
+      p.stunTimer = 0;
+    }
 
     if (p.hp <= 0 && !p.dead) {
       p.dead = true;
       p.deaths = (p.deaths || 0) + 1;
       p.respawnTimer = 2.0;
+      if (p.mountedHorse) dismountHorse(state, world, p, false);
       showToastFor(state, p, 'ВЫ ПОГИБЛИ... [R] — ВОЗРОДИТЬСЯ', 2.2);
     }
     if (p.dead) {
@@ -2982,17 +3911,62 @@
     }
     p._prevLmb = !!inp.lmb;
 
-    // 2. Движение, перекат и система укрытий
+    // 2. Движение, верховая езда, перекат и система укрытий
     let moveX = 0;
     let moveY = 0;
-    if (!p.dead) {
+    if (!p.dead && (p.stunTimer || 0) <= 0) {
       if (keys.KeyW || keys.ArrowUp) moveY -= 1;
       if (keys.KeyS || keys.ArrowDown) moveY += 1;
       if (keys.KeyA || keys.ArrowLeft) moveX -= 1;
       if (keys.KeyD || keys.ArrowRight) moveX += 1;
     }
 
-    if (p.rolling) {
+    const activeHorse = (p.mountedHorse && world.horse && world.horse.state !== 'dead' && world.horse.riderId === p.id) ? world.horse : null;
+    if (p.mountedHorse && !activeHorse) p.mountedHorse = false;
+
+    if (activeHorse && !p.dead) {
+      p.rolling = false;
+      p.inCover = false;
+      p.peeking = false;
+      p.coverObj = null;
+      if (activeHorse.state === 'bucking') {
+        p.vx = 0;
+        p.vy = 0;
+        p.x = activeHorse.x;
+        p.y = activeHorse.y;
+      } else {
+        if (moveX !== 0 || moveY !== 0) {
+          const mLen = Math.hypot(moveX, moveY);
+          moveX /= mLen;
+          moveY /= mLen;
+        }
+        const mountMaxSpd = p.bandaging ? 80 : (p.drinking ? 90 : 210);
+        activeHorse.vx = G.MATH.lerp(activeHorse.vx || 0, moveX * mountMaxSpd, Math.min(1, dt * 8.5));
+        activeHorse.vy = G.MATH.lerp(activeHorse.vy || 0, moveY * mountMaxSpd, Math.min(1, dt * 8.5));
+        activeHorse.x += activeHorse.vx * dt;
+        activeHorse.y += activeHorse.vy * dt;
+        activeHorse.x = G.MATH.clamp(activeHorse.x, 38, world.width - 38);
+        activeHorse.y = G.MATH.clamp(activeHorse.y, 28, world.height - 28);
+        for (let pass = 0; pass < 2; pass++) {
+          for (let i = 0; i < world.solids.length; i++) {
+            const res = G.MATH.circleRectPush(activeHorse.x, activeHorse.y, activeHorse.r || 13, world.solids[i]);
+            if (res.hit) {
+              activeHorse.x = res.x;
+              activeHorse.y = res.y;
+            }
+          }
+        }
+        activeHorse.speed = Math.hypot(activeHorse.vx, activeHorse.vy);
+        if (activeHorse.speed > 20) {
+          const wantHAng = Math.atan2(activeHorse.vy, activeHorse.vx);
+          activeHorse.angle = G.MATH.normAngle((activeHorse.angle || 0) + G.MATH.angleDiff(activeHorse.angle || 0, wantHAng) * Math.min(1, dt * 10));
+        }
+        p.x = activeHorse.x;
+        p.y = activeHorse.y;
+        p.vx = activeHorse.vx;
+        p.vy = activeHorse.vy;
+      }
+    } else if (p.rolling) {
       p.rollTimer -= dt;
       p.vx = p.rollDx * G.CFG.rollSpeed;
       p.vy = p.rollDy * G.CFG.rollSpeed;
@@ -3320,19 +4294,7 @@
     const breathAmp = (inp.rmb ? 0.004 : 0.012) * (p.inCover && p.peeking ? 0.55 : 1.0);
     const breathOff = Math.sin(p.breathPhase) * breathAmp + Math.sin(p.breathPhase * 2) * breathAmp * 0.4;
     p.targetAngle = G.MATH.normAngle(rawTarget + breathOff);
-
-    const inertia = G.CFG.phys.inertia;
-    const springMul = G.CFG.phys.spring;
-    const effK = (w.springK / (w.weight * inertia)) * springMul;
-    const effDamp = (w.damping / Math.sqrt(w.weight * inertia)) / Math.sqrt(springMul);
-
-    const subDt = dt * 0.5;
-    for (let s = 0; s < 2; s++) {
-      const diff = G.MATH.angleDiff(p.aimAngle, p.targetAngle);
-      const acc = diff * effK - p.aimVel * effDamp;
-      p.aimVel += acc * subDt;
-      p.aimAngle = G.MATH.normAngle(p.aimAngle + p.aimVel * subDt);
-    }
+    stepAimSpring(p, 'aimAngle', p.targetAngle, w, dt, 1.0);
 
     // 4. Динамический разброс
     p.bloom = Math.max(0, p.bloom - w.bloomDecay * dt);
@@ -3433,6 +4395,7 @@
   function stepClientVisuals(state, world, dt) {
     dt = Math.min(dt, 0.033);
     state.time += dt;
+    if (G.syncPlayersCache) G.syncPlayersCache(state);
     if (!state.waterRipples) state.waterRipples = [];
     if (!state.bloodDrops) state.bloodDrops = [];
     if (!state.flyingHats) state.flyingHats = [];
@@ -3460,13 +4423,21 @@
         ws.reloadOpenFrac = G.MATH.lerp(ws.reloadOpenFrac || 0, ws.reloading ? 1 : 0, Math.min(1, dt * 14));
       }
 
-      if (world && world.getIndoorZoneAt) {
+      if (world && world.getZoneAt) {
+        const zn = world.getZoneAt(localP.x, localP.y);
+        state.zone = zn.id;
+        state.zoneLabel = zn.label;
+        state.echoDesc = zn.id === 'saloon'
+          ? 'ЗАКРЫТОЕ ПОМЕЩЕНИЕ'
+          : (zn.id === 'canyon' ? 'СКАЛЬНОЕ ЭХО КАНЬОНА' : 'ОТКРЫТОЕ ЭХО УЛИЦЫ');
+      } else if (world && world.getIndoorZoneAt) {
         const iz = world.getIndoorZoneAt(localP.x, localP.y);
+        const cStartX = (world.layout && world.layout.canyonStartX) || 1400;
         if (iz) {
           state.zone = iz.id;
           state.zoneLabel = 'САЛУН';
           state.echoDesc = 'ЗАКРЫТОЕ ПОМЕЩЕНИЕ';
-        } else if (localP.x < 1030) {
+        } else if (localP.x < cStartX) {
           state.zone = 'street';
           state.zoneLabel = 'ГЛАВНАЯ УЛИЦА';
           state.echoDesc = 'ОТКРЫТОЕ ЭХО УЛИЦЫ';
@@ -3504,6 +4475,7 @@
     updateShells(state, world, dt);
     updateParticles(state, world, dt);
     updateGunSmokeClouds(state, world, dt);
+    if (world && world.updateBirds) world.updateBirds(dt);
 
     // Ветер и перекати-поле бури на клиенте по синхронизированной интенсивности
     const ds = state.dustStorm;
@@ -3525,8 +4497,9 @@
           tw.y = world.saloon.y + world.saloon.h + 18;
         }
         if (world && (tw.x < -30 || tw.y > world.height + 20)) {
+          const maxTwY = (world.layout && world.layout.streetBot) ? world.layout.streetBot + 50 : 660;
           tw.x = world.width - G.MATH.rand(20, 120);
-          tw.y = G.MATH.rand(90, Math.min(world.height - 90, 560));
+          tw.y = G.MATH.rand(90, Math.min(world.height - 90, maxTwY));
         }
       }
       if (G.AUDIO.updateWind) {
@@ -3571,11 +4544,16 @@
     stopWaveMode,
     handleKeyDownForPlayer,
     handleKeyDown,
+    notifyBanditsOfShot,
+    scareHorse,
+    mountHorse,
+    dismountHorse,
     updateSinglePlayer,
 
     update(state, world, dt) {
       dt = Math.min(dt, 0.033);
       state.time += dt;
+      if (G.syncPlayersCache) G.syncPlayersCache(state);
       if (!state.waterRipples) state.waterRipples = [];
       if (!state.bloodDrops) state.bloodDrops = [];
       if (!state.flyingHats) state.flyingHats = [];
@@ -3659,8 +4637,9 @@
         }
       }
 
-      // 2. Обновление мира, ботов, баллистики и частиц
-      world.updateDoors(dt, playersList);
+      // 2. Обновление мира, дверей, лошади, ботов, баллистики и частиц
+      world.updateDoors(dt, playersList, state);
+      updateHorse(state, world, dt);
       world.updateTargets(dt, playersList, state);
       updateWaves(state, world, dt);
       updateCriticalAndBleeding(state, world, dt);

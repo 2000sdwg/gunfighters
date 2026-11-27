@@ -25,6 +25,9 @@
     valEcho: document.getElementById('val-echo'),
     slAccuracy: document.getElementById('sl-accuracy'),
     valAccuracy: document.getElementById('val-accuracy'),
+    btnDiffEasy: document.getElementById('btn-diff-easy'),
+    btnDiffMedium: document.getElementById('btn-diff-medium'),
+    btnDiffHard: document.getElementById('btn-diff-hard'),
     slBotCap: document.getElementById('sl-bot-cap'),
     valBotCap: document.getElementById('val-bot-cap'),
     slBotInterval: document.getElementById('sl-bot-interval'),
@@ -37,6 +40,12 @@
     btnToggleRays: document.getElementById('btn-toggle-rays'),
     btnToggleBandits: document.getElementById('btn-toggle-bandits'),
     btnToggleStorm: document.getElementById('btn-toggle-storm'),
+    btnSpawnHorse: document.getElementById('btn-spawn-horse'),
+    btnToggleGodMode: document.getElementById('btn-toggle-godmode'),
+    horseHudRow: document.getElementById('horse-hud-row'),
+    horseHpFill: document.getElementById('horse-hp-fill'),
+    horseCalmFill: document.getElementById('horse-calm-fill'),
+    horseHudVal: document.getElementById('horse-hud-val'),
     toast: document.getElementById('center-toast'),
     hatMenu: document.getElementById('hat-menu'),
     hatList: document.getElementById('hat-list'),
@@ -52,6 +61,8 @@
     btnEditorPlace: document.getElementById('btn-editor-place'),
     btnEditorRotate: document.getElementById('btn-editor-rotate'),
     btnEditorErase: document.getElementById('btn-editor-erase'),
+    btnEditorTabObjects: document.getElementById('btn-editor-tab-objects'),
+    btnEditorTabNpc: document.getElementById('btn-editor-tab-npc'),
     editorPalette: document.getElementById('editor-palette'),
     btnEditorSave: document.getElementById('btn-editor-save'),
     btnEditorCopy: document.getElementById('btn-editor-copy'),
@@ -155,7 +166,54 @@
   let lastHatMenuKey = '';
   let lastInvKey = '';
   let lastEditorKey = '';
+  let lastEditorTab = '';
   let lastNetKey = '';
+  let netUiTimer = 0;
+
+  let fpsAccum = 0;
+  let fpsFrames = 0;
+  let curFps = 60;
+  let curFrameMs = 16.7;
+
+  const vignetteCanvas = document.createElement('canvas');
+  const vctx = vignetteCanvas.getContext('2d');
+
+  const discCache = new Map();
+  const DISC_CACHE_LIMIT = 256;
+
+  function getCachedPixelDisc(radius, color) {
+    const qr = Math.max(2, Math.round(radius / 2) * 2);
+    const key = `${color}|${qr}`;
+    let entry = discCache.get(key);
+    if (entry) return entry;
+
+    if (discCache.size >= DISC_CACHE_LIMIT) {
+      const oldestKey = discCache.keys().next().value;
+      if (oldestKey !== undefined) discCache.delete(oldestKey);
+    }
+
+    const sz = qr * 2 + 1;
+    const c = document.createElement('canvas');
+    c.width = sz;
+    c.height = sz;
+    const g = c.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    g.fillStyle = color;
+    for (let dy = -qr; dy <= qr; dy++) {
+      const span = Math.floor(Math.sqrt(qr * qr - dy * dy));
+      if (span >= 0) {
+        g.fillRect(qr - span, qr + dy, span * 2 + 1, 1);
+      }
+    }
+    entry = { canvas: c, qr: qr, half: qr };
+    discCache.set(key, entry);
+    return entry;
+  }
+
+  function isInView(x, y, w, h, org, pad) {
+    const p = pad !== undefined ? pad : 48;
+    return !(x + w < org.x - p || x > org.x + pixW + p || y + h < org.y - p || y > org.y + pixH + p);
+  }
 
   // ==================== ЗАПЕЧЁННЫЙ ВИДЖЕТ ИММЕРСИВНОЙ ПЕРЕЗАРЯДКИ (136x84, ПРОЗРАЧНЫЙ) ====================
 
@@ -1024,6 +1082,20 @@
     pixCanvas.width = pixW;
     pixCanvas.height = pixH;
     pctx.imageSmoothingEnabled = false;
+
+    vignetteCanvas.width = Math.max(1, viewW);
+    vignetteCanvas.height = Math.max(1, viewH);
+    if (vctx) {
+      vctx.clearRect(0, 0, vignetteCanvas.width, vignetteCanvas.height);
+      const grad = vctx.createRadialGradient(
+        viewW * 0.5, viewH * 0.5, Math.min(viewW, viewH) * 0.34,
+        viewW * 0.5, viewH * 0.5, Math.max(viewW, viewH) * 0.72
+      );
+      grad.addColorStop(0, 'rgba(255, 232, 185, 0.0)');
+      grad.addColorStop(1, 'rgba(24, 16, 11, 0.28)');
+      vctx.fillStyle = grad;
+      vctx.fillRect(0, 0, viewW, viewH);
+    }
   }
 
   function getCamOrigin() {
@@ -1106,6 +1178,13 @@
     ui.btnToggleWaves.classList.toggle('btn-warn', active);
   }
 
+  function updateGodModeButton() {
+    if (!ui.btnToggleGodMode) return;
+    const on = !!(G.CFG && G.CFG.godMode);
+    ui.btnToggleGodMode.textContent = `Бессмертие: ${on ? 'ВКЛ' : 'ВЫКЛ'}`;
+    ui.btnToggleGodMode.classList.toggle('active', on);
+  }
+
   // Приводим элементы настроек к значениям из G.CFG (после загрузки из localStorage)
   function syncSettingsUI() {
     if (ui.slInertia && ui.valInertia) {
@@ -1140,6 +1219,15 @@
     }
     updateSpawnButton();
     updateWavesButton();
+    updateDiffButtons();
+    updateGodModeButton();
+  }
+
+  function updateDiffButtons() {
+    const diff = G.CFG.botDifficulty || 'hard';
+    if (ui.btnDiffEasy) ui.btnDiffEasy.classList.toggle('active', diff === 'easy');
+    if (ui.btnDiffMedium) ui.btnDiffMedium.classList.toggle('active', diff === 'medium');
+    if (ui.btnDiffHard) ui.btnDiffHard.classList.toggle('active', diff === 'hard');
   }
 
   function getEditorTpl(type) {
@@ -1147,7 +1235,7 @@
     for (let i = 0; i < pal.length; i++) {
       if (pal[i].type === type) return pal[i];
     }
-    return pal[0] || { type: 'crate', label: 'Ящик', w: 34, h: 32, mat: 'wood', high: false, rotatable: false };
+    return pal[0] || { category: 'objects', kind: 'solid', type: 'crate', label: 'Ящик', w: 34, h: 32, mat: 'wood', high: false, rotatable: false };
   }
 
   function getEditorPlaceBox() {
@@ -1159,17 +1247,24 @@
     const h = rot ? tpl.w : tpl.h;
     const wm = screenToWorld(state.input.mouseX, state.input.mouseY);
     const step = ed.gridStep || 8;
-    const x = Math.round((wm.x - w * 0.5) / step) * step;
-    const y = Math.round((wm.y - h * 0.5) / step) * step;
-    return { tpl, x: G.MATH.clamp(x, 8, world.width - w - 8), y: G.MATH.clamp(y, 8, world.height - h - 8), w, h, wm };
+    const x = G.MATH.clamp(Math.round((wm.x - w * 0.5) / step) * step, 8, world.width - w - 8);
+    const y = G.MATH.clamp(Math.round((wm.y - h * 0.5) / step) * step, 8, world.height - h - 8);
+    return { tpl, x, y, cx: Math.round(x + w * 0.5), cy: Math.round(y + h * 0.5), w, h, wm };
   }
 
   function buildEditorPaletteDOM() {
     if (!ui.editorPalette) return;
     ui.editorPalette.innerHTML = '';
     const pal = G.EDITOR_PALETTE || [];
+    const activeTab = (state && state.editor && state.editor.tab) || 'objects';
+    lastEditorTab = activeTab;
+    let firstInTab = null;
+    let hasSelected = false;
     for (let i = 0; i < pal.length; i++) {
       const item = pal[i];
+      if ((item.category || 'objects') !== activeTab) continue;
+      if (!firstInTab) firstInTab = item;
+      if (state && state.editor && state.editor.selectedType === item.type) hasSelected = true;
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'editor-item';
@@ -1178,7 +1273,7 @@
       lblSpan.textContent = item.label;
       const szSpan = document.createElement('span');
       szSpan.className = 'editor-item-size';
-      szSpan.textContent = `${item.w}×${item.h}`;
+      szSpan.textContent = item.category === 'npc' ? 'NPC' : `${item.w}×${item.h}`;
       btn.appendChild(lblSpan);
       btn.appendChild(szSpan);
       btn.addEventListener('click', () => {
@@ -1188,6 +1283,9 @@
         lastEditorKey = '';
       });
       ui.editorPalette.appendChild(btn);
+    }
+    if (state && state.editor && !hasSelected && firstInTab) {
+      state.editor.selectedType = firstInTab.type;
     }
   }
 
@@ -1291,28 +1389,55 @@
         }
         const wm = screenToWorld(e.clientX, e.clientY);
         if (e.button === 2 || state.editor.tool === 'erase') {
-          const hitS = world.findSolidAtPoint ? world.findSolidAtPoint(wm.x, wm.y) : null;
-          if (hitS && world.removeSolidById(hitS.id, state)) {
+          const hit = world.findEditorEntityAt ? world.findEditorEntityAt(wm.x, wm.y) : null;
+          if (hit && world.removeEditorEntity && world.removeEditorEntity(hit, state)) {
             if (G.NET && G.NET.broadcastMapSync) G.NET.broadcastMapSync(state, world);
-            G.SIM.showToast(state, `УДАЛЕНО: ${hitS.type.toUpperCase()}`, 0.9);
+            G.SIM.showToast(state, `УДАЛЕНО: ${String(hit.label || hit.kind).toUpperCase()}`, 0.9);
           }
           return;
         }
         if (e.button === 0 && state.editor.tool === 'place') {
           const box = getEditorPlaceBox();
-          if (box && world.addEditorSolid) {
-            world.addEditorSolid({
-              x: box.x,
-              y: box.y,
-              w: box.w,
-              h: box.h,
-              mat: box.tpl.mat,
-              type: box.tpl.type,
-              high: box.tpl.high,
-              isCover: true
-            });
-            if (G.NET && G.NET.broadcastMapSync) G.NET.broadcastMapSync(state, world);
-            G.SIM.showToast(state, `ДОБАВЛЕНО: ${box.tpl.label.toUpperCase()}`, 0.8);
+          if (box) {
+            const knd = box.tpl.kind || 'solid';
+            let placed = false;
+            if (knd === 'solid' && world.addEditorSolid) {
+              world.addEditorSolid({
+                x: box.x,
+                y: box.y,
+                w: box.w,
+                h: box.h,
+                mat: box.tpl.mat,
+                type: box.tpl.type,
+                high: box.tpl.high,
+                isCover: true,
+                isHitchingPost: !!box.tpl.isHitchingPost,
+                interior: !!box.tpl.interior
+              });
+              placed = true;
+            } else if (knd === 'tree' && world.addEditorTree) {
+              world.addEditorTree(box.cx, box.cy, box.tpl.r || 22);
+              placed = true;
+            } else if (knd === 'pole' && world.addEditorPole) {
+              world.addEditorPole(box.cx, box.cy);
+              placed = true;
+            } else if (knd === 'bottle' && world.addEditorBottle) {
+              world.addEditorBottle(box.cx, box.cy);
+              placed = true;
+            } else if (knd === 'bandit' && world.addEditorBandit) {
+              world.addEditorBandit(box.cx, box.cy, box.tpl);
+              placed = true;
+            } else if (knd === 'horse' && world.placeEditorHorse) {
+              world.placeEditorHorse(box.cx, box.cy, state);
+              placed = true;
+            } else if (knd === 'sheep' && world.addEditorSheep) {
+              world.addEditorSheep(box.cx, box.cy);
+              placed = true;
+            }
+            if (placed) {
+              if (G.NET && G.NET.broadcastMapSync) G.NET.broadcastMapSync(state, world);
+              G.SIM.showToast(state, `ДОБАВЛЕНО: ${box.tpl.label.toUpperCase()}`, 0.8);
+            }
           }
           return;
         }
@@ -1466,6 +1591,22 @@
     bindSlider(ui.slSpring, ui.valSpring, 'spring');
     bindSlider(ui.slEcho, ui.valEcho, 'echo');
 
+    // Кнопки сложности AI ботов (Лёгкий / Средний / Тяжёлый)
+    [
+      [ui.btnDiffEasy, 'easy'],
+      [ui.btnDiffMedium, 'medium'],
+      [ui.btnDiffHard, 'hard']
+    ].forEach(([btn, diffId]) => {
+      if (!btn) return;
+      btn.addEventListener('click', () => {
+        G.CFG.botDifficulty = diffId;
+        updateDiffButtons();
+        G.saveSettings();
+        const prof = G.getBotDiffProfile ? G.getBotDiffProfile() : null;
+        G.SIM.showToast(state, `СЛОЖНОСТЬ AI: ${(prof ? prof.label : diffId).toUpperCase()}`, 1.2);
+      });
+    });
+
     // Ползунок меткости ботов: чем ниже, тем шире разброс их выстрелов
     if (ui.slAccuracy) {
       ui.slAccuracy.addEventListener('input', () => {
@@ -1580,6 +1721,34 @@
       });
     }
 
+    if (ui.btnSpawnHorse) {
+      ui.btnSpawnHorse.addEventListener('click', () => {
+        if (!world || !world.spawnHorse) return;
+        const plist = G.SIM && G.SIM.getPlayers ? G.SIM.getPlayers(state) : [state.player];
+        world.spawnHorse(plist);
+        G.SIM.showToast(state, 'ЛОШАДЬ У КОНОВЯЗИ', 1.3);
+        updateHUD();
+      });
+    }
+
+    if (ui.btnToggleGodMode) {
+      ui.btnToggleGodMode.addEventListener('click', () => {
+        G.CFG.godMode = !G.CFG.godMode;
+        if (G.CFG.godMode && state && state.player) {
+          const lp = state.player;
+          lp.hp = lp.maxHp || 100;
+          lp.critical = false;
+          lp.bleeding = false;
+          lp.dead = false;
+          lp.stunTimer = 0;
+        }
+        updateGodModeButton();
+        G.saveSettings();
+        G.SIM.showToast(state, G.CFG.godMode ? 'БЕССМЕРТИЕ: ВКЛ' : 'БЕССМЕРТИЕ: ВЫКЛ', 1.2);
+        updateHUD();
+      });
+    }
+
     if (ui.bandageSlot) {
       ui.bandageSlot.addEventListener('click', () => {
         G.AUDIO.unlock();
@@ -1620,6 +1789,24 @@
     if (ui.btnEditorErase) {
       ui.btnEditorErase.addEventListener('click', () => {
         if (state && state.editor) state.editor.tool = 'erase';
+        lastEditorKey = '';
+      });
+    }
+    if (ui.btnEditorTabObjects) {
+      ui.btnEditorTabObjects.addEventListener('click', () => {
+        if (!state || !state.editor) return;
+        state.editor.tab = 'objects';
+        state.editor.tool = 'place';
+        buildEditorPaletteDOM();
+        lastEditorKey = '';
+      });
+    }
+    if (ui.btnEditorTabNpc) {
+      ui.btnEditorTabNpc.addEventListener('click', () => {
+        if (!state || !state.editor) return;
+        state.editor.tab = 'npc';
+        state.editor.tool = 'place';
+        buildEditorPaletteDOM();
         lastEditorKey = '';
       });
     }
@@ -1833,12 +2020,13 @@
     if (s.type === 'hay') return 7;
     if (s.type === 'trough') return 5;
     if (s.type === 'fence') return 9;
+    if (s.type === 'hitching_post' || s.isHitchingPost) return 5;
     if (s.type === 'low_wall') return 5;
     return 6;
   }
 
   function drawNoonShadow(g, s) {
-    const sal = (world && world.saloon) || { x: 24, y: 180, w: 316, h: 380 };
+    const sal = (world && world.saloon) || { x: 24, y: 170, w: 440, h: 460 };
     const insideSaloon = s.x + s.w <= sal.x + sal.w + 2 && s.y >= sal.y && s.y + s.h <= sal.y + sal.h && s.type !== 'wall';
     const len = insideSaloon ? getShadowLength(s) * 0.45 : getShadowLength(s);
     const sx = Math.round(SUN.dx * len);
@@ -1903,102 +2091,87 @@
   function initCloudCaches() {
     if (cloudCaches) return cloudCaches;
 
-    // Пиксельный силуэт облака: кластер прямоугольных пятен с рваными краями.
-    // Мягкость — только за счёт rgba и ступеней плотности, без сглаживания.
+    // Цельный кучный силуэт облака из плотно перекрывающихся овальных «клубов» (без шума и оторванных пикселей)
     function bakeOneCloud(w, h, seed) {
       const { c, g } = makeOffscreen(w, h);
       const P0 = getPal();
       const coldBase = (P0.slateTeal && P0.slateTeal[4]) || '#152225';
-      const cCore = palRgba(coldBase, 0.38);
-      const cMid = palRgba(coldBase, 0.26);
-      const cEdge = palRgba(coldBase, 0.15);
+      const cCore = palRgba(coldBase, 0.34);
+      const cMid = palRgba(coldBase, 0.22);
+      const cEdge = palRgba(coldBase, 0.11);
       const rng = makeRng(seed);
-      const cell = 3;
+      const cell = 4;
       const cols = Math.floor(w / cell);
       const rows = Math.floor(h / cell);
       const grid = new Float32Array(cols * rows);
 
-      // 5–7 перекрывающихся «пиксельных» ядер облака
-      const cores = [];
-      const coreCount = 5 + Math.floor(rng() * 3);
-      for (let i = 0; i < coreCount; i++) {
-        cores.push({
-          cx: (0.16 + rng() * 0.64) * cols,
-          cy: (0.28 + rng() * 0.44) * rows,
-          rx: (0.16 + rng() * 0.19) * cols,
-          ry: (0.17 + rng() * 0.19) * rows
+      // Единый плотный кластер из 7–9 перекрывающихся клубов вокруг центра масс
+      const puffs = [{
+        cx: cols * (0.48 + (rng() - 0.5) * 0.08),
+        cy: rows * (0.50 + (rng() - 0.5) * 0.08),
+        rx: cols * (0.24 + rng() * 0.06),
+        ry: rows * (0.26 + rng() * 0.06)
+      }];
+      const extraCount = 6 + Math.floor(rng() * 3); // всего 7–9 клубов
+      for (let i = 0; i < extraCount; i++) {
+        const ang = (i / extraCount) * Math.PI * 2 + (rng() - 0.5) * 0.45;
+        const distK = 0.38 + rng() * 0.45;
+        puffs.push({
+          cx: puffs[0].cx + Math.cos(ang) * cols * 0.22 * distK,
+          cy: puffs[0].cy + Math.sin(ang) * rows * 0.20 * distK,
+          rx: cols * (0.14 + rng() * 0.11),
+          ry: rows * (0.17 + rng() * 0.12)
         });
       }
 
       for (let cy = 0; cy < rows; cy++) {
         for (let cx = 0; cx < cols; cx++) {
           let v = 0;
-          for (let i = 0; i < cores.length; i++) {
-            const k = cores[i];
-            const dx = (cx - k.cx) / k.rx;
-            const dy = (cy - k.cy) / k.ry;
+          for (let i = 0; i < puffs.length; i++) {
+            const pf = puffs[i];
+            const dx = (cx - pf.cx) / pf.rx;
+            const dy = (cy - pf.cy) / pf.ry;
             const val = 1 - Math.sqrt(dx * dx + dy * dy);
             if (val > v) v = val;
           }
-          // Сдвиг по SUN: силуэт вытянут и скошен в сторону солнца, не симметричен
-          const slant = ((rows - cy) / rows) * (cores[0].rx * 0.10);
-          const shifted = v - (cx < cores[0].cx - slant ? 0.06 : 0) - (cx > cores[0].cx + slant ? 0.02 : 0);
-          const noise = hashPix(cx + seed, cy * 3 + seed) - 0.5;
-          grid[cy * cols + cx] = shifted + noise * 0.42;
+          // Небольшой сдвиг тени в сторону полуденного солнца (без шумовой россыпи)
+          const slant = ((rows - cy) / rows) * (puffs[0].rx * 0.08);
+          const shifted = v - (cx < puffs[0].cx - slant ? 0.04 : 0) - (cx > puffs[0].cx + slant ? 0.015 : 0);
+          grid[cy * cols + cx] = shifted;
         }
       }
 
+      // 3 чистых ступенчатых слоя с единой пиксельной сеткой cell×cell
       for (let cy = 0; cy < rows; cy++) {
         for (let cx = 0; cx < cols; cx++) {
           const v = grid[cy * cols + cx];
           const px = cx * cell;
           const py = cy * cell;
-          if (v > 0.34) {
-            // Плотное ядро
+          if (v > 0.40) {
             g.fillStyle = cCore;
             g.fillRect(px, py, cell, cell);
-          } else if (v > 0.15) {
-            // Промежуточная плотность — честный пиксельный дизеринг по сетке
+          } else if (v > 0.20) {
             g.fillStyle = cMid;
-            if (((cx + cy) & 1) === 0) {
-              g.fillRect(px, py, cell, cell);
-            } else {
-              g.fillRect(px + 1, py, cell - 1, cell);
-              g.fillRect(px, py + 1, cell, cell - 1);
-            }
-          } else if (v > 0.02) {
-            // Рваная кромка: отдельные пиксельные «клочки»
-            if (hashPix(cx * 7 + seed, cy * 11 + seed) < 0.52) {
-              g.fillStyle = cEdge;
-              g.fillRect(px, py, 2, 2);
-              if (hashPix(cx * 3 + seed, cy * 5 + seed) < 0.32) {
-                g.fillRect(px + 2, py + 1, 1, 1);
-              }
-            }
+            g.fillRect(px, py, cell, cell);
+          } else if (v > 0.04) {
+            g.fillStyle = cEdge;
+            g.fillRect(px, py, cell, cell);
           }
         }
-      }
-
-      // Разрывы внутри силуэта (просветы между «клубами»)
-      for (let i = 0; i < 7; i++) {
-        const hx = Math.floor(rng() * cols) * cell;
-        const hy = Math.floor(rng() * rows) * cell;
-        if (grid[Math.floor(hy / cell) * cols + Math.floor(hx / cell)] <= 0.2) continue;
-        g.clearRect(hx, hy, cell, cell);
       }
 
       return c;
     }
 
     cloudCaches = [
-      bakeOneCloud(264, 138, 114),
-      bakeOneCloud(342, 180, 227),
-      bakeOneCloud(282, 150, 339)
+      bakeOneCloud(272, 144, 114),
+      bakeOneCloud(348, 184, 227),
+      bakeOneCloud(296, 156, 339)
     ];
     return cloudCaches;
   }
 
-  function drawCloudShadows(g) {
+  function drawCloudShadows(g, org) {
     const caches = initCloudCaches();
     const period = world.width + 520;
     // Бег облаков по ветру, синхронизированный с рябью бочек
@@ -2027,16 +2200,20 @@
       const cl = clouds[i];
       const px = Math.round(cl.x);
       const py = Math.round(cl.y + (cl.x - world.width * 0.5) * 0.02 * sunK);
+      if (org && !isInView(px, py, cl.img.width, cl.img.height, org, 16)) continue;
       g.drawImage(cl.img, px, py);
     }
     g.restore();
   }
 
   function drawSaloonDaylight(g) {
-    // Все координаты привязаны к world.saloon (карта сдвигается — свет едет вместе с ней)
-    const sal = (world && world.saloon) || { x: 24, y: 180, w: 316, h: 380 };
+    // Все координаты привязаны строго к world.saloon и world.layout
+    const lay = (world && world.layout) || null;
+    const sal = (world && world.saloon) || (lay && lay.saloon) || { x: 24, y: 170, w: 440, h: 460 };
     const bx = sal.x;
     const by = sal.y;
+    const rightIn = bx + sal.w - 16;
+    const doorMidY = (lay && lay.doorCenterY) || (by + Math.round(sal.h * 0.5));
 
     // Прохладное затемнение интерьера
     g.fillStyle = 'rgba(20, 24, 32, 0.28)';
@@ -2044,24 +2221,26 @@
 
     // Честные ступенчатые пиксельные световые пятна от открытых распашных дверей
     g.fillStyle = 'rgba(242, 218, 145, 0.26)';
-    g.fillRect(bx + 272, by + 152, 28, 70);
+    g.fillRect(rightIn - 28, doorMidY - 38, 28, 76);
     g.fillStyle = 'rgba(242, 218, 145, 0.17)';
-    g.fillRect(bx + 244, by + 144, 28, 86);
+    g.fillRect(rightIn - 56, doorMidY - 46, 28, 92);
     g.fillStyle = 'rgba(242, 218, 145, 0.09)';
-    g.fillRect(bx + 216, by + 136, 28, 102);
+    g.fillRect(rightIn - 84, doorMidY - 54, 28, 108);
 
     // Световые пятна от правых окон салуна
-    const windowSpots = [by + 48, by + 278];
+    const win1Y = (lay && lay.win1Y) || (by + 72);
+    const win2Y = (lay && lay.win2Y) || (by + sal.h - 100);
+    const windowSpots = [win1Y, win2Y];
     windowSpots.forEach((wy) => {
       g.fillStyle = 'rgba(242, 218, 145, 0.22)';
-      g.fillRect(bx + 260, wy - 4, 40, 32);
+      g.fillRect(rightIn - 40, wy - 4, 40, 32);
       g.fillStyle = 'rgba(242, 218, 145, 0.11)';
-      g.fillRect(bx + 240, wy - 1, 20, 26);
+      g.fillRect(rightIn - 60, wy - 1, 20, 26);
 
       // Тени от оконного деревянного переплёта (крестовина)
       g.fillStyle = 'rgba(20, 24, 32, 0.24)';
-      g.fillRect(bx + 254, wy + 11, 46, 2);
-      g.fillRect(bx + 278, wy - 4, 2, 32);
+      g.fillRect(rightIn - 46, wy + 11, 46, 2);
+      g.fillRect(rightIn - 22, wy - 4, 2, 32);
     });
   }
 
@@ -2080,10 +2259,12 @@
     }
   }
 
-  function drawDecals(g) {
+  function drawDecals(g, org) {
     const P = getPal();
     for (let i = 0; i < state.decals.length; i++) {
       const dc = state.decals[i];
+      const rad = dc.w ? Math.max(dc.w, dc.h || dc.w) : (dc.r || 6) * 2;
+      if (org && !isInView(dc.x - rad, dc.y - rad, rad * 2, rad * 2, org, 24)) continue;
       if (dc.kind === 'blood') {
         g.save();
         g.translate(Math.round(dc.x), Math.round(dc.y));
@@ -2144,40 +2325,6 @@
     }
   }
 
-  function clipOutPuddleObstacles(g, px, py, r) {
-    const pad = r + 3;
-    const x0 = Math.round(px - pad);
-    const y0 = Math.round(py - pad);
-    const sz = pad * 2;
-    let clipped = false;
-
-    const addExclusion = (rx, ry, rw, rh) => {
-      if (rx + rw <= x0 || rx >= x0 + sz || ry + rh <= y0 || ry >= y0 + sz) return;
-      if (!clipped) {
-        g.beginPath();
-        g.rect(x0, y0, sz, sz);
-        clipped = true;
-      }
-      g.rect(Math.round(rx), Math.round(ry), Math.round(rw), Math.round(rh));
-    };
-
-    if (world && world.solids) {
-      for (let i = 0; i < world.solids.length; i++) {
-        const s = world.solids[i];
-        if (s.type === 'fence' || s.type === 'wall' || s.type === 'building' || s.type === 'cliff' || s.type === 'low_wall') {
-          addExclusion(s.x, s.y, s.w, s.h);
-        }
-      }
-    }
-    if (world && world.streetTop && py >= world.streetTop - 8 && py <= world.streetTop + 56) {
-      addExclusion(340, world.streetTop, 506, 22);
-    }
-    if (world && world.streetBot && py >= world.streetBot - 36 && py <= world.streetBot + 32) {
-      addExclusion(340, world.streetBot, 506, 22);
-    }
-    if (clipped) g.clip('evenodd');
-  }
-
   function isJetPointBlocked(wx, wy, container) {
     if (world && world.solids) {
       for (let i = 0; i < world.solids.length; i++) {
@@ -2186,15 +2333,24 @@
         if (wx >= s.x && wx <= s.x + s.w && wy >= s.y && wy <= s.y + s.h) return true;
       }
     }
-    if (world && world.streetTop && wx >= 340 && wx <= 850 && container.y >= world.streetTop + 18 && wy < world.streetTop + 22) {
+    const lay = world && world.layout;
+    const stX1 = lay ? lay.streetStartX : 464;
+    const stX2 = lay ? lay.streetEndX : 1248;
+    if (world && world.streetTop && wx >= stX1 && wx <= stX2 && container.y >= world.streetTop + 18 && wy < world.streetTop + 22) {
       return true;
     }
     return false;
   }
 
-  function drawPuddles(g) {
+  function drawPuddles(g, org) {
     if (!world || !world.puddles || !world.puddles.length) return;
     const P = getPal();
+    const lay = world.layout;
+    const stTop = lay ? lay.streetTop : world.streetTop;
+    const stBot = lay ? lay.streetBot : world.streetBot;
+    const stX1 = lay ? lay.streetStartX : 464;
+    const stX2 = lay ? lay.streetEndX : 1248;
+    const hasStreetBounds = stTop !== undefined && stBot !== undefined;
     for (let i = 0; i < world.puddles.length; i++) {
       const pd = world.puddles[i];
       const fade = pd.alpha !== undefined ? G.MATH.clamp(pd.alpha, 0, 1) : 1.0;
@@ -2202,27 +2358,40 @@
       if (fade <= 0.02 || r < 2) continue;
       const px = Math.round(pd.x);
       const py = Math.round(pd.y);
-      g.save();
-      clipOutPuddleObstacles(g, px, py, r);
+      if (org && !isInView(px - r, py - r, r * 2, r * 2, org, 16)) continue;
+
+      const onMainStreet = hasStreetBounds && px >= stX1 - 20 && px <= stX2 + 24 && py >= stTop - 16 && py <= stBot + 36;
+      if (onMainStreet) {
+        g.save();
+        g.beginPath();
+        g.rect(stX1 - 4, stTop + 22, (stX2 - stX1) + 12, stBot - (stTop + 22));
+        g.clip();
+      }
+
       g.globalAlpha = 0.72 * fade;
-      g.fillStyle = P.water[3];
-      drawPixelDisc(g, px, py, r);
+      const outerDisc = getCachedPixelDisc(r, P.water[3]);
+      g.drawImage(outerDisc.canvas, px - outerDisc.half, py - outerDisc.half);
       if (r >= 4) {
-        g.fillStyle = P.water[2];
-        drawPixelDisc(g, px - 1, py - 1, Math.max(2, r - 3));
+        const innerDisc = getCachedPixelDisc(Math.max(2, r - 3), P.water[2]);
+        g.drawImage(innerDisc.canvas, px - 1 - innerDisc.half, py - 1 - innerDisc.half);
       }
       g.globalAlpha = 0.85 * fade;
       g.fillStyle = P.water[0];
       g.fillRect(px - Math.max(2, Math.floor(r * 0.4)), py - Math.max(2, Math.floor(r * 0.4)), Math.max(3, Math.floor(r * 0.45)), 1);
-      g.restore();
+
+      if (onMainStreet) {
+        g.restore();
+      }
     }
+    g.globalAlpha = 1;
   }
 
-  function drawBloodTrail(g) {
+  function drawBloodTrail(g, org) {
     if (!state.bloodTrail || !state.bloodTrail.length) return;
     const P = getPal();
     for (let i = 0; i < state.bloodTrail.length; i++) {
       const tr = state.bloodTrail[i];
+      if (org && !isInView(tr.x - 4, tr.y - 4, 8, 8, org, 16)) continue;
       const frac = G.MATH.clamp(tr.life / tr.maxLife, 0, 1);
       g.globalAlpha = Math.min(0.85, frac * 1.15);
       g.fillStyle = tr.r > 2.4 ? P.blood[1] : P.blood[0];
@@ -2232,10 +2401,11 @@
     g.globalAlpha = 1;
   }
 
-  function drawBloodDrops(g) {
+  function drawBloodDrops(g, org) {
     if (!state.bloodDrops || !state.bloodDrops.length) return;
     for (let i = 0; i < state.bloodDrops.length; i++) {
       const bd = state.bloodDrops[i];
+      if (org && !isInView(bd.x - 6, bd.y - 12, 12, 24, org, 16)) continue;
       g.fillStyle = 'rgba(24, 10, 8, 0.34)';
       g.fillRect(Math.round(bd.x + SUN.dx * bd.z * 0.25), Math.round(bd.y + SUN.dy * bd.z * 0.25), 2, 1);
 
@@ -2392,14 +2562,46 @@
     const waterR = cache.waterR;
     const colOut = P.outline || '#140f0c';
 
-    // Подготовка буфера водного содержимого (без arc())
+    const wLvl = s.waterLevel !== undefined ? G.MATH.clamp(s.waterLevel, 0, 1) : 1.0;
+
+    // Ближайший живой игрок + проверка вспышки и активной ряби
+    const plsBarrel = (G.SIM && G.SIM.getPlayers) ? G.SIM.getPlayers(state) : [state.player];
+    let p = state.player;
+    let bestBDist = Infinity;
+    for (let pi = 0; pi < plsBarrel.length; pi++) {
+      const cand = plsBarrel[pi];
+      if (!cand || cand.dead) continue;
+      const cpos = G.SIM.getRenderPos(cand);
+      const cd = Math.hypot(cpos.x - cx, cpos.y - cy);
+      if (cd < bestBDist) {
+        bestBDist = cd;
+        p = cand;
+      }
+    }
+    const pos = p ? G.SIM.getRenderPos(p) : { x: cx + 999, y: cy + 999 };
+    const dx = pos.x - cx;
+    const dy = pos.y - cy;
+    const dist = Math.hypot(dx, dy);
+
+    let hasRipple = false;
+    if (state.waterRipples && state.waterRipples.length && wLvl > 0.05) {
+      for (let i = 0; i < state.waterRipples.length; i++) {
+        if (state.waterRipples[i].barrelId === s.id) {
+          hasRipple = true;
+          break;
+        }
+      }
+    }
+    const hasFlash = !!(p && p.flashTimer > 0 && dist < 130 && wLvl > 0.05);
+    const hasReflection = !!(p && !p.dead && dist < 62 && wLvl > 0.05);
+
+    // Единый рендер воды для всех видимых бочек (без расхождения между «быстрой» и «детальной» веткой)
     const wg = waterScratchCtx;
     const lx = cache.cx;
     const ly = cache.cy;
     wg.clearRect(0, 0, cache.w, cache.h);
     wg.save();
 
-    const wLvl = s.waterLevel !== undefined ? G.MATH.clamp(s.waterLevel, 0, 1) : 1.0;
     if (wLvl <= 0.05) {
       // Пустое дощатое дно высохшей бочки
       wg.fillStyle = P.woodWarm[4];
@@ -2435,26 +2637,8 @@
     wg.fillRect(lx - waterR, ly - waterR, waterR * 2, rimShadowDepth);
     wg.fillRect(lx - waterR, ly - waterR, Math.max(2, Math.round(rimShadowDepth * 0.75)), waterR * 2);
 
-    // Отражение ближайшего живого игрока при приближении (dist < 62) — с его шляпой и оружием
-    const plsBarrel = (G.SIM && G.SIM.getPlayers) ? G.SIM.getPlayers(state) : [state.player];
-    let p = state.player;
-    let bestBDist = Infinity;
-    for (let pi = 0; pi < plsBarrel.length; pi++) {
-      const cand = plsBarrel[pi];
-      if (!cand || cand.dead) continue;
-      const cpos = G.SIM.getRenderPos(cand);
-      const cd = Math.hypot(cpos.x - cx, cpos.y - cy);
-      if (cd < bestBDist) {
-        bestBDist = cd;
-        p = cand;
-      }
-    }
-    const pos = p ? G.SIM.getRenderPos(p) : { x: cx + 999, y: cy + 999 };
-    const dx = pos.x - cx;
-    const dy = pos.y - cy;
-    const dist = Math.hypot(dx, dy);
-
-    if (p && !p.dead && dist < 62 && wLvl > 0.05) {
+    // Плавное появление отражения ближайшего живого игрока при приближении (dist < 62)
+    if (hasReflection) {
       const prox = G.MATH.clamp(1 - dist / 62, 0, 1);
       const wobX = Math.sin(state.time * 5.2 + cy) * 1.3;
       const wobY = Math.cos(state.time * 4.4 + cx) * 0.8;
@@ -2465,7 +2649,7 @@
       wg.translate(refX, refY);
       wg.rotate(p.aimAngle);
       wg.scale(1, -1);
-      wg.globalAlpha = 0.20 + prox * 0.52;
+      wg.globalAlpha = prox * 0.72;
 
       wg.fillStyle = colOut;
       wg.fillRect(-6, -9, 12, 18);
@@ -2508,7 +2692,7 @@
     }
 
     // Попиксельная вспышка выстрела на воде (без arc())
-    if (p.flashTimer > 0 && dist < 130 && wLvl > 0.05) {
+    if (hasFlash) {
       const fl = (p.flashTimer / 0.06) * (1 - dist / 130);
       wg.globalAlpha = 0.52 * fl;
       wg.fillStyle = P.brass[0];
@@ -2760,9 +2944,13 @@
         }
       }
 
-      // Окна салуна (на sal_right1: y ~ 118; sal_right2: y ~ 348)
+      // Окна салуна (привязаны к world.layout)
       if (s.id === 'sal_right1' || s.id === 'sal_right2') {
-        const wy = (s.id === 'sal_right1') ? (118 - s.y) : (348 - s.y);
+        const lay = world && world.layout;
+        const winAbsY = (s.id === 'sal_right1')
+          ? ((lay && lay.win1Y) || (s.y + 72))
+          : ((lay && lay.win2Y) || (s.y + 90));
+        const wy = G.MATH.clamp(winAbsY - s.y, 8, Math.max(8, s.h - 34));
         // Объёмная рама окна
         g.fillStyle = colOut;
         g.fillRect(0, wy - 2, s.w, 28);
@@ -2815,8 +3003,8 @@
       g.fillRect(2, 2, s.w - 4, 5);
       g.fillStyle = P.woodPale[2];
       g.fillRect(18, 3, 16, 1);
-      g.fillRect(72, 3, 24, 1);
-      g.fillRect(122, 3, 14, 1);
+      g.fillRect(Math.round(s.w * 0.42), 3, 24, 1);
+      g.fillRect(Math.max(36, s.w - 42), 3, 18, 1);
 
       // Латунная окантовка по переднему ребру столешницы
       g.fillStyle = P.brass[0];
@@ -2841,18 +3029,19 @@
       g.fillStyle = P.glass[0];
       g.fillRect(34, 5, 1, 1);
 
-      // Вторая бутылка и стаканы справа
+      // Вторая бутылка и стаканы ближе к правому краю стойки
+      const rbX = Math.max(80, s.w - 30);
       g.fillStyle = P.foliage[1];
-      g.fillRect(134, 4, 3, 5);
+      g.fillRect(rbX, 4, 3, 5);
       g.fillStyle = P.woodPale[0];
-      g.fillRect(135, 3, 1, 1);
+      g.fillRect(rbX + 1, 3, 1, 1);
       g.fillStyle = P.glass[0];
-      g.fillRect(134, 5, 1, 2);
+      g.fillRect(rbX, 5, 1, 2);
 
       g.fillStyle = P.glass[1];
-      g.fillRect(140, 5, 2, 3);
+      g.fillRect(rbX + 6, 5, 2, 3);
       g.fillStyle = P.glass[0];
-      g.fillRect(140, 5, 1, 1);
+      g.fillRect(rbX + 6, 5, 1, 1);
 
       return c;
     }
@@ -2998,7 +3187,7 @@
     drawCoverDamageOverlay(g, s);
   }
 
-  function drawPolesAndWires(g) {
+  function drawPolesAndWires(g, org) {
     if (!world.poles || !world.poles.length) return;
     const P = getPal();
     const poles = world.poles;
@@ -3008,6 +3197,11 @@
     for (let i = 0; i < poles.length - 1; i++) {
       const a = poles[i];
       const b = poles[i + 1];
+      const minX = Math.min(a.x, b.x);
+      const maxX = Math.max(a.x, b.x);
+      const minY = Math.min(a.y, b.y);
+      const maxY = Math.max(a.y, b.y);
+      if (org && !isInView(minX, minY, maxX - minX + 24, maxY - minY + 32, org, 32)) continue;
       g.beginPath();
       g.moveTo(a.x + 12, a.y + 18);
       g.quadraticCurveTo((a.x + b.x) * 0.5 + 12, (a.y + b.y) * 0.5 + 24, b.x + 12, b.y + 18);
@@ -3019,6 +3213,11 @@
     for (let i = 0; i < poles.length - 1; i++) {
       const a = poles[i];
       const b = poles[i + 1];
+      const minX = Math.min(a.x, b.x);
+      const maxX = Math.max(a.x, b.x);
+      const minY = Math.min(a.y, b.y);
+      const maxY = Math.max(a.y, b.y);
+      if (org && !isInView(minX, minY, maxX - minX + 16, maxY - minY + 16, org, 32)) continue;
       [-3, 3].forEach((off) => {
         g.beginPath();
         g.moveTo(a.x, a.y + off);
@@ -3029,6 +3228,7 @@
 
     for (let i = 0; i < poles.length; i++) {
       const p = poles[i];
+      if (org && !isInView(p.x - 10, p.y - 10, 28, 30, org, 32)) continue;
       g.fillStyle = 'rgba(18, 13, 9, 0.36)';
       g.fillRect(p.x + 2, p.y + 2, 10, 14);
       g.fillStyle = '#1f1610';
@@ -3045,10 +3245,12 @@
     }
   }
 
-  function drawTrees(g) {
+  function drawTrees(g, org) {
     if (!world.trees || !world.trees.length) return;
     for (let i = 0; i < world.trees.length; i++) {
       const tr = world.trees[i];
+      const rad = (tr.r || 18) * 1.4;
+      if (org && !isInView(tr.x - rad, tr.y - rad, rad * 2 + 16, rad * 2 + 16, org, 32)) continue;
       g.fillStyle = 'rgba(20, 14, 10, 0.34)';
       g.beginPath();
       g.ellipse(
@@ -3318,7 +3520,7 @@
       brimHi = P.leather[1];
       crownBase = P.leather[2];
       crownHi = P.leather[0];
-      bandCol = P.brass[1];
+      bandCol = P.leather[4];
     } else if (id === 'bowler') {
       rx = 7.2; ry = 6.2;
       brimBase = P.cloth[4];
@@ -3425,12 +3627,11 @@
 
     // Детализированные акценты конкретных моделей
     if (id === 'sheriff') {
-      // Латунная звезда шерифа спереди тульи
-      g.fillStyle = colOut;
-      g.fillRect(cx + 3, cy - 1, 3, 3);
+      // Аккуратная чёткая золотая полоска на тулье без золотой обводки по периметру
+      g.fillStyle = P.brass[1];
+      g.fillRect(cx - 3, cy + 1, 7, 1);
       g.fillStyle = P.brass[0];
-      g.fillRect(cx + 4, cy - 1, 1, 3);
-      g.fillRect(cx + 3, cy, 3, 1);
+      g.fillRect(cx - 2, cy + 1, 1, 1);
     } else if (id === 'bowler') {
       // Изогнутый блик купольного котелка
       g.fillStyle = P.cloth[0];
@@ -3457,6 +3658,21 @@
   function drawPlayerHat(g, hx, hy, hatId) {
     const c = getPlayerHatCanvas(hatId || G.CFG.selectedHat || 'classic');
     g.drawImage(c, Math.round(hx - 15), Math.round(hy - 15));
+  }
+
+  function drawStunStars(g, x, y, P) {
+    const t = state ? state.time : 0;
+    for (let i = 0; i < 3; i++) {
+      const a = t * 9.0 + i * 2.0944;
+      const sx = Math.round(x + Math.cos(a) * 8);
+      const sy = Math.round(y - 14 + Math.sin(a) * 3.5);
+      g.fillStyle = P.outline || '#140f0c';
+      g.fillRect(sx - 2, sy - 2, 4, 4);
+      g.fillStyle = P.brass[0];
+      g.fillRect(sx - 1, sy - 1, 2, 2);
+      g.fillStyle = '#fff9df';
+      g.fillRect(sx - 1, sy - 1, 1, 1);
+    }
   }
 
   function drawBanditAlive(g, t) {
@@ -3516,29 +3732,37 @@
     const pullY = Math.round(raiseFrac * 1.8);
 
     const gunY = 4 - pullY;
+    const wId = t.weaponId || (t.gunType === 'rifle' ? 'winchester' : 'walker');
+    const isRifle = wId === 'winchester';
+    const isWalker = wId === 'walker';
+    const kick = Math.round((t.recoilKickAnim || 0) * (isRifle ? 2.5 : 2.0));
+    const reloadShift = Math.round((t.reloadOpenFrac || 0) * 1.6);
+
     // Правое предплечье/кисть сгибаются к груди (при ранении в руку — кровавый след на рукаве)
     g.fillStyle = t.coatColor;
-    g.fillRect(Math.round(2 - pullX * 0.5), Math.round(3 - pullY * 0.5), 5, 4);
+    g.fillRect(Math.round(2 - pullX * 0.5 - kick * 0.5), Math.round(3 - pullY * 0.5), 5, 4);
     if (t.armWounded) {
       g.fillStyle = P.blood[0];
-      g.fillRect(Math.round(3 - pullX * 0.5), Math.round(3 - pullY * 0.5), 3, 2);
+      g.fillRect(Math.round(3 - pullX * 0.5 - kick * 0.5), Math.round(3 - pullY * 0.5), 3, 2);
       g.fillStyle = P.blood[1];
-      g.fillRect(Math.round(4 - pullX * 0.5), Math.round(5 - pullY * 0.5), 2, 1);
+      g.fillRect(Math.round(4 - pullX * 0.5 - kick * 0.5), Math.round(5 - pullY * 0.5), 2, 1);
     }
     g.fillStyle = P.skin ? P.skin[1] : '#c49876';
-    g.fillRect(Math.round(5 - pullX * 0.7), Math.round(3.5 - pullY * 0.5), 3, 3);
+    g.fillRect(Math.round(5 - pullX * 0.7 - kick), Math.round(3.5 - pullY * 0.5), 3, 3);
 
-    if (t.gunType === 'rifle') {
+    let tipX = 15;
+    if (isRifle) {
       // Левая рука тянется от левого плеча (-2, -7) к цевью винтовки
       g.fillStyle = t.coatColor;
       g.fillRect(-1, -6, 5, 4);
-      g.fillRect(Math.round(3 - pullX * 0.4), Math.round(-3 - pullY * 0.4), 5, 4);
+      g.fillRect(Math.round(3 - pullX * 0.4 - kick * 0.5), Math.round(-3 - pullY * 0.4), 5, 4);
       g.fillStyle = P.skin ? P.skin[1] : '#c49876';
-      g.fillRect(Math.round(7 - pullX * 0.6), Math.round(1 - pullY * 0.5), 3, 3);
+      g.fillRect(Math.round(7 - pullX * 0.6 - kick), Math.round(1 - pullY * 0.5), 3, 3);
 
-      const recX = Math.round(1 - pullX * 0.5);
+      const recX = Math.round(1 - pullX * 0.5 - kick);
       const barStart = recX + Math.max(3, Math.round(8 * cosPitch));
       const gunLenR = Math.max(2, Math.round(12 * cosPitch));
+      tipX = barStart + gunLenR;
 
       g.fillStyle = P.woodWarm[2];
       g.fillRect(recX, gunY, Math.max(3, barStart - recX), 2);
@@ -3546,21 +3770,39 @@
       g.fillRect(barStart, gunY, gunLenR, 2);
       g.fillStyle = P.steelDark[1];
       g.fillRect(barStart, gunY, Math.max(1, gunLenR - 1), 1);
+      if (t.reloadOpenFrac > 0.25) {
+        g.fillStyle = P.brass[0];
+        g.fillRect(recX + 2, gunY - 1, 2, 1);
+      }
       if (sinPitch > 0.35) {
         g.fillStyle = P.steelDark[0];
         g.fillRect(barStart, gunY - 1, Math.max(2, gunLenR), 1);
       }
     } else {
-      const barStart = Math.round(7 - pullX * 0.6);
-      const gunLenP = Math.max(2, Math.round(8 * cosPitch));
-      g.fillStyle = P.steelDark[3];
+      const baseLen = isWalker ? 9 : 6;
+      const barStart = Math.round(7 - pullX * 0.6 - kick);
+      const gunLenP = Math.max(2, Math.round(baseLen * cosPitch));
+      tipX = barStart + gunLenP;
+      const ramp = isWalker ? P.steelLight : P.steelDark;
+      g.fillStyle = ramp[3];
       g.fillRect(barStart, gunY, gunLenP, 2);
-      g.fillStyle = P.steelDark[1];
+      g.fillStyle = ramp[1];
       g.fillRect(barStart + 1, gunY, Math.max(1, gunLenP - 1), 1);
+      if (t.reloadOpenFrac > 0.25) {
+        // Откинутый барабан при перезарядке бандита
+        g.fillStyle = P.brass[1];
+        g.fillRect(barStart - 1, gunY + reloadShift, 2, 2);
+      }
       if (sinPitch > 0.35) {
-        g.fillStyle = P.steelDark[0];
+        g.fillStyle = ramp[0];
         g.fillRect(barStart, gunY - 1, Math.max(2, gunLenP), 1);
       }
+    }
+    if (t.flashTimer > 0 && raiseFrac < 0.45) {
+      g.fillStyle = '#fff5c0';
+      g.fillRect(tipX, gunY - 1, 3, 3);
+      g.fillStyle = P.brass[0];
+      g.fillRect(tipX + 2, gunY, 2, 1);
     }
 
     // Тело (скруглённые пиксельные углы + группировка плеч в приседе)
@@ -3631,13 +3873,29 @@
       g.fillStyle = t.tough ? P.grass[0] : P.blood[0];
       g.fillRect(bx, by, Math.max(1, Math.round(bw * frac)), 2);
     }
+    if (t.reloading) {
+      const rw = 14;
+      const rFrac = G.MATH.clamp((t.ammo || 0) / Math.max(1, t.maxAmmo || 6), 0, 1);
+      const rx = Math.round(tx - rw * 0.5);
+      const ry = Math.round(ty - (t.tough ? 24 : 21));
+      g.fillStyle = colOut;
+      g.fillRect(rx - 1, ry - 1, rw + 2, 3);
+      g.fillStyle = P.woodWarm[3];
+      g.fillRect(rx, ry, rw, 1);
+      g.fillStyle = P.brass[0];
+      g.fillRect(rx, ry, Math.max(1, Math.round(rw * rFrac)), 1);
+    }
+    if (t.stunTimer > 0) {
+      drawStunStars(g, tx, ty, P);
+    }
   }
 
-  function drawFlyingHats(g) {
+  function drawFlyingHats(g, org) {
     if (!state.flyingHats || !state.flyingHats.length) return;
     const P = getPal();
     for (let i = 0; i < state.flyingHats.length; i++) {
       const h = state.flyingHats[i];
+      if (org && !isInView(h.x - 10, h.y - 16, 20, 24, org, 24)) continue;
       g.fillStyle = 'rgba(18, 12, 8, 0.36)';
       g.fillRect(
         Math.round(h.x + SUN.dx * (2 + h.z * 0.3) - 5),
@@ -3654,21 +3912,23 @@
     }
   }
 
-  function drawDeadBandits(g) {
+  function drawDeadBandits(g, org) {
     if (G.CFG.spawnBandits === false) return;
     for (let i = 0; i < world.targets.length; i++) {
       const t = world.targets[i];
       if (t.kind === 'bandit' && !t.alive) {
+        if (org && !isInView(t.x - 24, t.y - 24, 48, 48, org, 32)) continue;
         drawBanditDead(g, t);
       }
     }
   }
 
-  function drawTargets(g) {
+  function drawTargets(g, org) {
     const P = getPal();
     for (let i = 0; i < world.targets.length; i++) {
       const t = world.targets[i];
       if (!t.alive) continue;
+      if (org && !isInView(t.x - 20, t.y - 20, 40, 40, org, 32)) continue;
 
       if (t.kind === 'bandit') {
         if (G.CFG.spawnBandits !== false) drawBanditAlive(g, t);
@@ -3678,15 +3938,6 @@
       const wob = t.wobble > 0 ? Math.sin(state.time * 42) * t.wobble * 2.4 : 0;
       const tx = Math.round(t.x + wob);
       const ty = Math.round(t.y);
-
-      const shLen = t.kind === 'bottle' ? 3 : 6;
-      if (t.kind !== 'bottle') {
-        // Пиксельная тень мишени (у бутылок — своя, прямоугольная)
-        g.fillStyle = 'rgba(20, 14, 9, 0.36)';
-        g.beginPath();
-        g.ellipse(tx + Math.round(SUN.dx * shLen), ty + Math.round(SUN.dy * shLen), t.r, t.r * 0.82, 0.3, 0, Math.PI * 2);
-        g.fill();
-      }
 
       if (t.kind === 'bottle') {
         // Пиксельная бутылка: корпус, горлышко, пробка и блик стекла (только G.PAL)
@@ -3720,31 +3971,15 @@
         g.fillStyle = P.glass[0];
         g.fillRect(tx - 1, ty - 1, 1, 2);
         g.fillRect(tx - 4, ty, 1, 1);
-      } else if (t.kind === 'steel') {
-        g.fillStyle = '#1f2326';
-        g.beginPath();
-        g.arc(tx, ty, t.r, 0, Math.PI * 2);
-        g.fill();
-        g.fillStyle = t.hitFlash > 0 ? '#f5e3ab' : P.stone[1];
-        g.beginPath();
-        g.arc(tx, ty, t.r - 1.5, 0, Math.PI * 2);
-        g.fill();
-        g.fillStyle = P.stone[0];
-        g.fillRect(tx - 4, ty - 5, 4, 2);
-        g.fillStyle = P.barnRed[1];
-        g.beginPath();
-        g.arc(tx, ty, t.r * 0.42, 0, Math.PI * 2);
-        g.fill();
-        g.fillStyle = P.cloud[0];
-        g.fillRect(tx - 1, ty - 1, 2, 2);
       }
     }
   }
 
-  function drawShells(g) {
+  function drawShells(g, org) {
     const P = getPal();
     for (let i = 0; i < state.shells.length; i++) {
       const sh = state.shells[i];
+      if (org && !isInView(sh.x - 6, sh.y - 10, 12, 16, org, 16)) continue;
       g.fillStyle = 'rgba(20, 15, 12, 0.45)';
       g.fillRect(
         Math.round(sh.x + SUN.dx * (1.5 + sh.z * 0.25) - 2),
@@ -4262,23 +4497,26 @@
     const hatBob = walking ? Math.abs(Math.sin(p.walkPhase || 0)) * 0.8 : 0;
 
     g.save();
-    g.translate(Math.round(pos.x), Math.round(pos.y));
+    g.translate(Math.round(pos.x), Math.round(pos.y - (p.mountedHorse ? 2 : 0)));
 
-    // Контактная тень (в кувырке и приседе сжимается под телом)
     const rollProg = p.rolling ? G.MATH.clamp(1 - p.rollTimer / G.CFG.rollDur, 0, 1) : 0;
     const rollSquash = p.rolling ? Math.sin(rollProg * Math.PI) : 0;
-    g.fillStyle = `rgba(18, 12, 9, ${0.46 + rollSquash * 0.12 + crouchF * 0.08})`;
-    g.beginPath();
-    g.ellipse(
-      Math.round(SUN.dx * (p.rolling ? 3.5 : 6.5 - crouchF * 2.2)),
-      Math.round(SUN.dy * (p.rolling ? 3.5 : 6.5 - crouchF * 2.2)),
-      (p.rolling ? 9.5 : 9.4) - rollSquash * 2.6 - crouchF * 1.4,
-      (p.rolling ? 7.2 : 8.2) - rollSquash * 1.4 - crouchF * 0.9,
-      0.3,
-      0,
-      Math.PI * 2
-    );
-    g.fill();
+
+    // Контактная тень (всадник не рисует отдельную тень под копытами коня)
+    if (!p.mountedHorse) {
+      g.fillStyle = `rgba(18, 12, 9, ${0.46 + rollSquash * 0.12 + crouchF * 0.08})`;
+      g.beginPath();
+      g.ellipse(
+        Math.round(SUN.dx * (p.rolling ? 3.5 : 6.5 - crouchF * 2.2)),
+        Math.round(SUN.dy * (p.rolling ? 3.5 : 6.5 - crouchF * 2.2)),
+        (p.rolling ? 9.5 : 9.4) - rollSquash * 2.6 - crouchF * 1.4,
+        (p.rolling ? 7.2 : 8.2) - rollSquash * 1.4 - crouchF * 0.9,
+        0.3,
+        0,
+        Math.PI * 2
+      );
+      g.fill();
+    }
 
     if (p.rolling) {
       // Реалистичный кувырок ВПЕРЁД через плечо/спину строго вдоль вектора движения rollAng
@@ -4705,6 +4943,307 @@
     }
 
     g.restore();
+
+    if (p.stunTimer > 0) {
+      drawStunStars(g, Math.round(pos.x), Math.round(pos.y), P);
+    }
+  }
+
+  function drawHorse(g, org) {
+    const h = world && world.horse;
+    if (!h) return;
+    if (org && !isInView(h.x - 30, h.y - 30, 60, 60, org, 36)) return;
+    const P = getPal();
+    const colOut = P.outline || '#140f0c';
+    const isDead = h.state === 'dead';
+    const isBucking = h.state === 'bucking';
+    const isGrazing = h.state === 'grazing';
+
+    // Привязь верёвкой к коновязи (до корпуса, чтобы не перекрывала всадника/гриву)
+    if (h.tied && !isDead && h.postX !== undefined) {
+      const headX = h.x + Math.cos(h.angle || 0) * 14;
+      const headY = h.y + Math.sin(h.angle || 0) * 14;
+      const px0 = Math.round(h.postX);
+      const py0 = Math.round(h.postY);
+      const px1 = Math.round(headX);
+      const py1 = Math.round(headY);
+      const steps = 10;
+      g.fillStyle = P.woodPale[2];
+      for (let s = 0; s <= steps; s++) {
+        const u = s / steps;
+        const sag = Math.sin(u * Math.PI) * 3;
+        g.fillRect(Math.round(px0 + (px1 - px0) * u), Math.round(py0 + (py1 - py0) * u + sag), 1, 1);
+      }
+    }
+
+    const hx = Math.round(h.x);
+    const hy = Math.round(h.y);
+
+    if (isDead) {
+      g.save();
+      g.translate(hx, hy);
+      g.rotate(h.angle || 0);
+      g.fillStyle = 'rgba(18, 12, 9, 0.35)';
+      g.fillRect(-14, -8, 28, 17);
+      g.fillStyle = P.blood[2];
+      fillRoundPix(g, -10, -7, 16, 14);
+      g.fillStyle = colOut;
+      fillRoundPix(g, -13, -7, 26, 14);
+      g.fillStyle = P.leather[2];
+      fillRoundPix(g, -12, -6, 24, 12);
+      g.fillStyle = P.leather[4];
+      g.fillRect(-15, -3, 4, 6);
+      g.fillRect(10, -4, 7, 8);
+      g.restore();
+      return;
+    }
+
+    // Длинная полуденная тень лошади
+    const shScale = isBucking ? 1.35 : 1.0;
+    g.fillStyle = 'rgba(18, 12, 9, 0.38)';
+    g.fillRect(
+      Math.round(hx + SUN.dx * 8 * shScale - 11),
+      Math.round(hy + SUN.dy * 8 * shScale - 6),
+      22,
+      12
+    );
+
+    const flash = (h.hitFlash || 0) > 0;
+    const stride = ((h.speed || 0) > 15 || isBucking) ? Math.sin(h.gallopPhase || 0) : 0;
+    const buckLift = isBucking ? Math.round(Math.abs(Math.sin((h.buckTimer || 0) * 14)) * 3.5) : 0;
+    const headExtend = isGrazing ? Math.round(Math.sin(h.grazePhase || 0) * 1.5 + 2) : (isBucking ? -3 : 0);
+
+    g.save();
+    g.translate(hx, hy - buckLift);
+    g.rotate(h.angle || 0);
+
+    // Анимированные копыта на скачке / дыбах
+    g.fillStyle = colOut;
+    g.fillRect(Math.round(5 + stride * 4), -8, 4, 2);
+    g.fillRect(Math.round(5 - stride * 4), 6, 4, 2);
+    g.fillRect(Math.round(-10 - stride * 3.5), -8, 4, 2);
+    g.fillRect(Math.round(-10 + stride * 3.5), 6, 4, 2);
+
+    // Хвост (развевается на скорости)
+    const tailWag = Math.round(stride * 2);
+    g.fillStyle = colOut;
+    fillRoundPix(g, -17, -2 + tailWag, 6, 4);
+    g.fillStyle = flash ? '#f2dfb8' : P.leather[4];
+    g.fillRect(-16, -1 + tailWag, 4, 2);
+
+    // Мощный корпус гнедого коня
+    g.fillStyle = flash ? '#f2dfb8' : colOut;
+    fillRoundPix(g, -13, -7, 25, 14);
+    g.fillStyle = flash ? '#fff2d4' : P.leather[2];
+    fillRoundPix(g, -12, -6, 23, 12);
+    g.fillStyle = flash ? '#fff2d4' : P.leather[1];
+    fillRoundPix(g, -9, -5, 17, 10);
+    // Солнечный блик вдоль спины
+    g.fillStyle = flash ? '#ffffff' : P.leather[0];
+    g.fillRect(-6, -3, 11, 4);
+
+    // Грива вдоль шеи
+    g.fillStyle = colOut;
+    g.fillRect(6, -3, 7, 6);
+    g.fillStyle = P.leather[4];
+    g.fillRect(7, -2, 5, 4);
+
+    // Шея и голова (вытягивается вниз при пощипывании травы, вздымается на дыбах)
+    const hBaseX = 11 + headExtend;
+    g.fillStyle = flash ? '#f2dfb8' : colOut;
+    fillRoundPix(g, hBaseX, -4, 9, 8);
+    g.fillStyle = flash ? '#fff2d4' : P.leather[2];
+    fillRoundPix(g, hBaseX + 1, -3, 7, 6);
+    g.fillStyle = P.leather[0];
+    g.fillRect(hBaseX + 2, -2, 4, 3);
+    // Ноздри и уши
+    g.fillStyle = colOut;
+    g.fillRect(hBaseX + 1, -5, 2, 2);
+    g.fillRect(hBaseX + 1, 3, 2, 2);
+    g.fillStyle = P.leather[4];
+    g.fillRect(hBaseX + 7, -2, 1, 4);
+    // Уздечка и поводья
+    g.fillStyle = P.brass[1];
+    g.fillRect(hBaseX + 5, -3, 1, 6);
+
+    // Седло и стремена (если не сбрасывает седло)
+    g.fillStyle = colOut;
+    fillRoundPix(g, -4, -6, 9, 12);
+    g.fillStyle = P.woodWarm[1];
+    fillRoundPix(g, -3, -5, 7, 10);
+    g.fillStyle = P.woodWarm[0];
+    g.fillRect(-2, -3, 5, 6);
+    g.fillStyle = P.brass[1];
+    g.fillRect(0, -6, 2, 1);
+    g.fillRect(0, 5, 2, 1);
+    g.fillRect(2, -2, 2, 4); // Лука седла
+
+    g.restore();
+
+    // Полоски HP и спокойствия (показываются при езде, ранении или испуге)
+    if (h.hp < (h.maxHp || 150) || (h.calm !== undefined && h.calm < 98) || h.state === 'ridden' || isBucking || h.state === 'stampede') {
+      const bw = 22;
+      const bx = hx - 11;
+      const by = hy - 20;
+      const hpFrac = G.MATH.clamp((h.hp || 0) / (h.maxHp || 150), 0, 1);
+      const calmFrac = G.MATH.clamp((h.calm !== undefined ? h.calm : 100) / (h.maxCalm || 100), 0, 1);
+      g.fillStyle = colOut;
+      g.fillRect(bx - 1, by - 1, bw + 2, 6);
+      g.fillStyle = '#331614';
+      g.fillRect(bx, by, bw, 2);
+      g.fillStyle = P.blood[0];
+      g.fillRect(bx, by, Math.max(1, Math.round(bw * hpFrac)), 2);
+      g.fillStyle = '#152225';
+      g.fillRect(bx, by + 3, bw, 1);
+      g.fillStyle = calmFrac > 0.35 ? P.water[0] : P.brass[0];
+      g.fillRect(bx, by + 3, Math.max(1, Math.round(bw * calmFrac)), 1);
+    }
+  }
+
+  function drawSheep(g, org) {
+    const list = world && world.sheep;
+    if (!list || !list.length) return;
+    const P = getPal();
+    const colOut = P.outline || '#140f0c';
+    const faceCol = P.leather ? P.leather[4] : '#1c110a';
+
+    for (let i = 0; i < list.length; i++) {
+      const sh = list[i];
+      if (!sh) continue;
+      if (org && !isInView(sh.x - 16, sh.y - 16, 32, 32, org, 24)) continue;
+
+      const sx = Math.round(sh.x);
+      const sy = Math.round(sh.y);
+
+      if (!sh.alive) {
+        g.save();
+        g.translate(sx, sy);
+        g.rotate(sh.angle || 0);
+        g.fillStyle = 'rgba(18, 12, 9, 0.32)';
+        g.fillRect(-7, -5, 14, 10);
+        g.fillStyle = P.blood[2];
+        fillRoundPix(g, -6, -5, 10, 9);
+        g.fillStyle = colOut;
+        fillRoundPix(g, -6, -4, 11, 8);
+        g.fillStyle = P.cloud[2];
+        fillRoundPix(g, -5, -3, 9, 6);
+        g.fillStyle = P.cloud[1];
+        g.fillRect(-4, -3, 6, 4);
+        g.fillStyle = faceCol;
+        g.fillRect(4, -2, 3, 4);
+        g.restore();
+        continue;
+      }
+
+      // Короткая полуденная тень по вектору SUN (без arc())
+      g.fillStyle = 'rgba(20, 14, 9, 0.34)';
+      g.fillRect(Math.round(sx + SUN.dx * 4 - 5), Math.round(sy + SUN.dy * 4 - 4), 10, 8);
+
+      const flash = (sh.hitFlash || 0) > 0;
+      const isWalking = sh.state === 'walk' || sh.state === 'flee';
+      const stride = isWalking ? Math.round(Math.sin(sh.walkPhase || 0) * 1.6) : 0;
+      const headDip = sh.state === 'graze' ? Math.round(Math.sin(sh.grazePhase || 0) * 1.1 + 1.5) : 0;
+
+      g.save();
+      g.translate(sx, sy);
+      g.rotate(sh.angle || 0);
+
+      // Короткие тёмные ножки
+      g.fillStyle = colOut;
+      g.fillRect(-4 + stride, -5, 2, 2);
+      g.fillRect(2 - stride, -5, 2, 2);
+      g.fillRect(-4 - stride, 3, 2, 2);
+      g.fillRect(2 + stride, 3, 2, 2);
+
+      // Пушистая пиксельная шерсть (контур 1px + кучные кластеры в G.PAL.cloud)
+      g.fillStyle = flash ? '#f2dfb8' : colOut;
+      fillRoundPix(g, -7, -5, 13, 10);
+      g.fillRect(-5, -6, 9, 12);
+      g.fillRect(-8, -3, 14, 6);
+
+      g.fillStyle = flash ? '#fff2d4' : P.cloud[2];
+      fillRoundPix(g, -6, -4, 11, 8);
+      g.fillRect(-4, -5, 7, 10);
+
+      // Освещение шерсти по полуденному солнцу (верх-лево светлее)
+      g.fillStyle = flash ? '#ffffff' : P.cloud[1];
+      fillRoundPix(g, -6, -4, 9, 7);
+      g.fillStyle = flash ? '#ffffff' : P.cloud[0];
+      g.fillRect(-5, -4, 5, 4);
+      g.fillRect(-2, -5, 4, 3);
+      g.fillRect(1, -2, 2, 2);
+
+      // Хвостик
+      g.fillStyle = colOut;
+      g.fillRect(-8, -1, 2, 2);
+      g.fillStyle = P.cloud[1];
+      g.fillRect(-7, -1, 1, 2);
+
+      // Тёмная мордочка и ушки (наклоняется и тянется вперёд при щипании травы)
+      const hx = 4 + headDip;
+      g.fillStyle = colOut;
+      g.fillRect(hx, -3, 5, 6);
+      g.fillStyle = faceCol;
+      g.fillRect(hx + 1, -2, 3, 4);
+      // Ушки по бокам головы
+      g.fillStyle = colOut;
+      g.fillRect(hx, -4, 2, 2);
+      g.fillRect(hx, 2, 2, 2);
+      // Белый хохолок на лбу и крошечный блик морды
+      g.fillStyle = P.cloud[0];
+      g.fillRect(hx, -1, 2, 2);
+      g.fillStyle = P.woodPale[2];
+      g.fillRect(hx + 3, -1, 1, 2);
+
+      g.restore();
+    }
+  }
+
+  function drawBirdFlocks(g, org) {
+    const flocks = world && world.birdFlocks;
+    if (!flocks || !flocks.length) return;
+    const P = getPal();
+    const cols = [P.steelDark[4], P.woodWarm[3], P.woodPale[2]];
+
+    for (let fi = 0; fi < flocks.length; fi++) {
+      const flock = flocks[fi];
+      if (!flock || flock.state === 'gone') continue;
+      if (flock.state === 'perched' && org && !isInView(flock.homeX - 36, flock.homeY - 36, 72, 72, org, 48)) continue;
+
+      for (let bi = 0; bi < flock.birds.length; bi++) {
+        const b = flock.birds[bi];
+        if (org && !isInView(b.x - 10, b.y - b.z * 0.45 - 10, 20, 20, org, 48)) continue;
+        const px = Math.round(b.x);
+        const py = Math.round(b.y - b.z * 0.45);
+
+        // Тень на земле / крыше
+        if (b.z > 0.5) {
+          g.fillStyle = 'rgba(18, 12, 8, 0.28)';
+          g.fillRect(Math.round(b.x + SUN.dx * (2 + b.z * 0.22)), Math.round(b.y + SUN.dy * (2 + b.z * 0.22)), 2, 2);
+        }
+
+        g.fillStyle = cols[b.colorIdx || 0];
+        if (flock.state === 'flying') {
+          const flap = Math.sin(b.wingPhase || 0) > 0;
+          g.fillRect(px, py, 2, 1);
+          if (flap) {
+            g.fillRect(px - 2, py - 1, 2, 1);
+            g.fillRect(px + 2, py - 1, 2, 1);
+          } else {
+            g.fillRect(px - 2, py + 1, 2, 1);
+            g.fillRect(px + 2, py + 1, 2, 1);
+          }
+        } else {
+          // Сидят на крыше (мелкие компактные воробьи/вороны с единым контуром)
+          g.fillStyle = P.outline;
+          g.fillRect(px - 1, py - 1, 4, 3);
+          g.fillStyle = cols[b.colorIdx || 0];
+          g.fillRect(px, py, 2, 2);
+          g.fillStyle = P.brass[1];
+          g.fillRect(px + 2, py, 1, 1);
+        }
+      }
+    }
   }
 
   function drawBullets(g) {
@@ -4722,9 +5261,10 @@
     }
   }
 
-  function drawParticles(g) {
+  function drawParticles(g, org) {
     for (let i = 0; i < state.particles.length; i++) {
       const pt = state.particles[i];
+      if (org && !isInView(pt.x - 6, pt.y - 6, 12, 12, org, 16)) continue;
       const frac = Math.max(0, pt.life / pt.maxLife);
       g.globalAlpha = frac * pt.alpha;
       g.fillStyle = pt.color;
@@ -4742,7 +5282,7 @@
     g.globalAlpha = 1;
   }
 
-  function drawDustMotes(g, dt) {
+  function drawDustMotes(g, dt, org) {
     const P = getPal();
     for (let i = 0; i < dustMotes.length; i++) {
       const m = dustMotes[i];
@@ -4752,6 +5292,7 @@
       if (m.y < 65) m.y = world.height - 70;
       if (m.y > world.height - 70) m.y = 65;
 
+      if (org && !isInView(m.x, m.y, 2, 2, org, 8)) continue;
       const alpha = 0.24 + 0.16 * Math.sin(state.time * 2.2 + m.phase);
       g.fillStyle = P.grass[0];
       g.globalAlpha = alpha;
@@ -4762,16 +5303,30 @@
 
   function drawDebugRays(g) {
     if (!G.CFG.debugRays) return;
+    const P = getPal();
     for (let i = 0; i < state.debugRays.length; i++) {
       const r = state.debugRays[i];
       const alpha = Math.max(0, r.life / r.maxLife) * 0.80;
-      g.strokeStyle = r.hit ? `rgba(126, 186, 178, ${alpha})` : `rgba(212, 174, 89, ${alpha * 0.45})`;
+      if (r.echoDistracted) {
+        g.strokeStyle = `rgba(242, 218, 145, ${Math.min(1, alpha * 1.15)})`;
+      } else {
+        g.strokeStyle = r.hit ? `rgba(126, 186, 178, ${alpha})` : `rgba(212, 174, 89, ${alpha * 0.45})`;
+      }
       g.lineWidth = 1;
       g.beginPath();
       g.moveTo(Math.round(r.x1), Math.round(r.y1));
       g.lineTo(Math.round(r.x2), Math.round(r.y2));
       g.stroke();
-      if (r.hit) {
+      if (r.echoDistracted) {
+        const ex = Math.round(r.x2);
+        const ey = Math.round(r.y2);
+        g.fillStyle = P.outline;
+        g.fillRect(ex - 3, ey - 3, 7, 7);
+        g.fillStyle = P.brass[0];
+        g.fillRect(ex - 2, ey - 2, 5, 5);
+        g.fillStyle = P.barnRed[0];
+        g.fillRect(ex - 1, ey - 1, 3, 3);
+      } else if (r.hit) {
         g.fillStyle = `rgba(235, 200, 110, ${alpha})`;
         g.fillRect(Math.round(r.x2 - 1), Math.round(r.y2 - 1), 3, 3);
       }
@@ -4790,12 +5345,26 @@
     }
   }
 
-  function drawGunSmokeClouds(g) {
+  function drawGunSmokeClouds(g, org) {
     const clouds = state && state.gunSmokeClouds;
-    if (!clouds || !clouds.length) return;
+    const flashes = state && state.smokeFlashes;
+    const hasClouds = !!(clouds && clouds.length);
+    const hasFlashes = !!(flashes && flashes.length);
+    if (!hasClouds && !hasFlashes) return;
     const P = getPal();
     const zones = (world && world.indoorZones) || [];
     if (!zones.length) return;
+
+    // Если в видимой области нет ни одного indoorZone — выходим сразу
+    let anyZoneVisible = false;
+    for (let zIdx = 0; zIdx < zones.length; zIdx++) {
+      const z = zones[zIdx];
+      if (!org || isInView(z.x, z.y, z.w, z.h, org, 24)) {
+        anyZoneVisible = true;
+        break;
+      }
+    }
+    if (!anyZoneVisible) return;
 
     g.save();
     g.beginPath();
@@ -4805,49 +5374,59 @@
     }
     g.clip();
 
-    for (let i = 0; i < clouds.length; i++) {
-      const c = clouds[i];
-      const lifeFrac = G.MATH.clamp(c.life / c.maxLife, 0, 1);
-      const fade = Math.min(1, lifeFrac * 1.45);
-      const cx = Math.round(c.x);
-      const cy = Math.round(c.y);
-      const r = Math.max(6, Math.round(c.r));
+    if (hasClouds) {
+      for (let i = 0; i < clouds.length; i++) {
+        const c = clouds[i];
+        const r = Math.max(6, Math.round(c.r));
+        const cx = Math.round(c.x);
+        const cy = Math.round(c.y);
+        if (org && !isInView(cx - r, cy - r, r * 2, r * 2, org, 24)) continue;
 
-      g.globalAlpha = 0.24 * fade * (c.density || 0.8);
-      g.fillStyle = P.stone[2];
-      drawPixelDisc(g, cx, cy, r);
+        const lifeFrac = G.MATH.clamp(c.life / c.maxLife, 0, 1);
+        const fade = Math.min(1, lifeFrac * 1.45);
+        const dens = c.density || 0.8;
 
-      g.globalAlpha = 0.34 * fade * (c.density || 0.8);
-      g.fillStyle = P.cloud[2];
-      drawPixelDisc(g, cx - 2, cy - 1, Math.round(r * 0.76));
+        g.globalAlpha = 0.24 * fade * dens;
+        const d1 = getCachedPixelDisc(r, P.stone[2]);
+        g.drawImage(d1.canvas, cx - d1.half, cy - d1.half);
 
-      g.globalAlpha = 0.42 * fade * (c.density || 0.8);
-      g.fillStyle = P.cloud[1];
-      drawPixelDisc(g, cx + 2, cy - 2, Math.round(r * 0.50));
-      drawPixelDisc(g, cx - Math.round(r * 0.35), cy + Math.round(r * 0.2), Math.round(r * 0.42));
+        g.globalAlpha = 0.34 * fade * dens;
+        const d2 = getCachedPixelDisc(Math.round(r * 0.76), P.cloud[2]);
+        g.drawImage(d2.canvas, cx - 2 - d2.half, cy - 1 - d2.half);
 
-      g.globalAlpha = 0.30 * fade;
-      g.fillStyle = P.cloud[0];
-      drawPixelDisc(g, cx - 1, cy - Math.round(r * 0.25), Math.round(r * 0.28));
+        g.globalAlpha = 0.42 * fade * dens;
+        const d3 = getCachedPixelDisc(Math.round(r * 0.50), P.cloud[1]);
+        g.drawImage(d3.canvas, cx + 2 - d3.half, cy - 2 - d3.half);
+        const d4 = getCachedPixelDisc(Math.round(r * 0.42), P.cloud[1]);
+        g.drawImage(d4.canvas, cx - Math.round(r * 0.35) - d4.half, cy + Math.round(r * 0.2) - d4.half);
+
+        g.globalAlpha = 0.30 * fade;
+        const d5 = getCachedPixelDisc(Math.round(r * 0.28), P.cloud[0]);
+        g.drawImage(d5.canvas, cx - 1 - d5.half, cy - Math.round(r * 0.25) - d5.half);
+      }
     }
 
     // Освещение внутри задымлённого помещения от вспышек выстрелов (подсвечивает дым и силуэты)
-    const flashes = state && state.smokeFlashes;
-    if (flashes && flashes.length) {
+    if (hasFlashes) {
       for (let i = 0; i < flashes.length; i++) {
         const fl = flashes[i];
-        const k = G.MATH.clamp(fl.life / fl.maxLife, 0, 1);
         const fx = Math.round(fl.x);
         const fy = Math.round(fl.y);
+        const fr = Math.round(fl.r);
+        if (org && !isInView(fx - fr, fy - fr, fr * 2, fr * 2, org, 24)) continue;
+
+        const k = G.MATH.clamp(fl.life / fl.maxLife, 0, 1);
         g.globalAlpha = 0.14 * k;
-        g.fillStyle = P.brass[0];
-        drawPixelDisc(g, fx, fy, Math.round(fl.r * (0.65 + 0.35 * k)));
+        const f1 = getCachedPixelDisc(Math.round(fl.r * (0.65 + 0.35 * k)), P.brass[0]);
+        g.drawImage(f1.canvas, fx - f1.half, fy - f1.half);
+
         g.globalAlpha = 0.26 * k;
-        g.fillStyle = P.grass[0];
-        drawPixelDisc(g, fx, fy, Math.round(fl.r * 0.45));
+        const f2 = getCachedPixelDisc(Math.round(fl.r * 0.45), P.grass[0]);
+        g.drawImage(f2.canvas, fx - f2.half, fy - f2.half);
+
         g.globalAlpha = 0.42 * k;
-        g.fillStyle = '#ffffff';
-        drawPixelDisc(g, fx, fy, Math.round(fl.r * 0.18));
+        const f3 = getCachedPixelDisc(Math.round(fl.r * 0.18), '#ffffff');
+        g.drawImage(f3.canvas, fx - f3.half, fy - f3.half);
       }
     }
 
@@ -4855,7 +5434,7 @@
     g.globalAlpha = 1;
   }
 
-  function drawMuzzleGlow(g) {
+  function drawMuzzleGlow(g, org) {
     const P = getPal();
     const plsGlow = (G.SIM && G.SIM.getPlayers) ? G.SIM.getPlayers(state) : (state.player ? [state.player] : []);
     const glows = [];
@@ -4882,21 +5461,23 @@
       const mx = Math.round(gl.x);
       const my = Math.round(gl.y);
       const r1 = Math.round((46 * fl + 10) * gl.rScale);
+      if (org && !isInView(mx - r1, my - r1, r1 * 2, r1 * 2, org, 16)) continue;
+
       const r2 = Math.round((26 * fl + 6) * gl.rScale);
       const r3 = Math.round((11 * fl + 3) * gl.rScale);
 
       // Ступенчатое попиксельное свечение строго без arc() и createRadialGradient
       g.globalAlpha = 0.09 * fl;
-      g.fillStyle = P.brass[0];
-      drawPixelDisc(g, mx, my, r1);
+      const g1 = getCachedPixelDisc(r1, P.brass[0]);
+      g.drawImage(g1.canvas, mx - g1.half, my - g1.half);
 
       g.globalAlpha = 0.18 * fl;
-      g.fillStyle = P.grass[0];
-      drawPixelDisc(g, mx, my, r2);
+      const g2 = getCachedPixelDisc(r2, P.grass[0]);
+      g.drawImage(g2.canvas, mx - g2.half, my - g2.half);
 
       g.globalAlpha = 0.34 * fl;
-      g.fillStyle = P.cloud[0];
-      drawPixelDisc(g, mx, my, r3);
+      const g3 = getCachedPixelDisc(r3, P.cloud[0]);
+      g.drawImage(g3.canvas, mx - g3.half, my - g3.half);
 
       g.globalAlpha = 0.62 * fl;
       g.fillStyle = '#ffffff';
@@ -5073,27 +5654,18 @@
     const iv = G.MATH.clamp(ds.intensity || 0, 0, 1);
     if (iv <= 0.01) return;
     const P = getPal();
-    const zones = (world && world.indoorZones) || [];
 
-    // 1. Клип снаружи всех indoorZones (внутри салуна — полное укрытие от ветра и песка)
-    g.save();
-    g.beginPath();
-    g.rect(org.x - 16, org.y - 16, pixW + 32, pixH + 32);
-    for (let i = 0; i < zones.length; i++) {
-      const z = zones[i];
-      g.rect(z.x + 8, z.y + 8, z.w - 16, z.h - 16);
-    }
-    g.clip('evenodd');
-
-    // 2. Перекати-поле с подпрыгиванием, вращением и контактной тенью по SUN
+    // 1. Перекати-поле с подпрыгиванием, вращением и контактной тенью по SUN (вне помещений и в кадре)
     if (ds.tumbleweeds && ds.tumbleweeds.length) {
       for (let i = 0; i < ds.tumbleweeds.length; i++) {
         const tw = ds.tumbleweeds[i];
-        const bz = Math.abs(Math.sin(tw.bouncePhase || 0)) * 5.5;
         const tx = Math.round(tw.x);
         const ty = Math.round(tw.y);
         const r = tw.r || 8;
+        if (org && !isInView(tx - r - 6, ty - r - 8, r * 2 + 12, r * 2 + 16, org, 24)) continue;
+        if (world && world.getIndoorZoneAt && world.getIndoorZoneAt(tx, ty)) continue;
 
+        const bz = Math.abs(Math.sin(tw.bouncePhase || 0)) * 5.5;
         // Контактная тень на земле по SUN
         g.globalAlpha = 0.34 * iv;
         g.fillStyle = P.outline;
@@ -5118,12 +5690,33 @@
       }
     }
 
-    // 3. Лёгкая пыльная дымка в G.PAL.dirt (строго без градиентов и CSS-размытий)
+    // 2. Пыльная дымка вокруг салуна (макс. 4 прямоугольника без clip('evenodd'))
+    const vx0 = org.x - 4;
+    const vy0 = org.y - 4;
+    const vx1 = org.x + pixW + 4;
+    const vy1 = org.y + pixH + 4;
     g.globalAlpha = 0.16 * iv;
     g.fillStyle = P.dirt[1];
-    g.fillRect(org.x - 4, org.y - 4, pixW + 8, pixH + 8);
 
-    // 4. Быстрые диагональные пиксельные полосы песка и песчинки
+    const salRaw = (world && world.saloon) || null;
+    if (!salRaw) {
+      g.fillRect(vx0, vy0, vx1 - vx0, vy1 - vy0);
+    } else {
+      const sx0 = Math.max(vx0, salRaw.x + 8);
+      const sy0 = Math.max(vy0, salRaw.y + 8);
+      const sx1 = Math.min(vx1, salRaw.x + salRaw.w - 8);
+      const sy1 = Math.min(vy1, salRaw.y + salRaw.h - 8);
+      if (sx1 <= sx0 || sy1 <= sy0) {
+        g.fillRect(vx0, vy0, vx1 - vx0, vy1 - vy0);
+      } else {
+        if (sy0 > vy0) g.fillRect(vx0, vy0, vx1 - vx0, sy0 - vy0);
+        if (vy1 > sy1) g.fillRect(vx0, sy1, vx1 - vx0, vy1 - sy1);
+        if (sx0 > vx0) g.fillRect(vx0, sy0, sx0 - vx0, sy1 - sy0);
+        if (vx1 > sx1) g.fillRect(sx1, sy0, vx1 - sx1, sy1 - sy0);
+      }
+    }
+
+    // 3. Быстрые диагональные пиксельные полосы песка и песчинки (пропускаем внутри indoorZones)
     const windSpeedX = 280;
     const windSpeedY = 96;
     const streakCount = Math.round(18 + iv * 34);
@@ -5133,6 +5726,8 @@
       const sy = org.y + ((((seed * 31 + state.time * windSpeedY * (0.85 + (i % 4) * 0.14)) % (pixH + 40)) + (pixH + 40)) % (pixH + 40)) - 20;
       const ix = Math.round(sx);
       const iy = Math.round(sy);
+      if (world && world.getIndoorZoneAt && world.getIndoorZoneAt(ix, iy)) continue;
+
       const len = 3 + (i % 4);
       g.globalAlpha = (0.32 + (i % 3) * 0.12) * iv;
       g.fillStyle = (i % 3 === 0) ? P.canyon[0] : P.dirt[0];
@@ -5141,7 +5736,6 @@
       }
     }
 
-    g.restore();
     g.globalAlpha = 1;
   }
 
@@ -5231,7 +5825,7 @@
       }
     }
 
-    if (state.nearInteractable && !state.hatMenuOpen) {
+    if (state.nearInteractable && state.nearInteractable.kind !== 'horse_dismount' && !state.hatMenuOpen) {
       const it = state.nearInteractable;
       const keyLbl = G.keyLabel(G.CFG.keys.interact);
       const msg = `[${keyLbl}] ${it.label}`;
@@ -5252,7 +5846,7 @@
     for (let i = 0; i < world.targets.length; i++) {
       const t = world.targets[i];
       if (t.kind !== 'bandit' || !t.alive) continue;
-      if (t.aiState === 'flee') {
+      if (t.aiState === 'flee' && !t.noAmmoFlee) {
         const scr = worldToScreen(t.x, t.y - 26);
         if (scr.x > -40 && scr.x < viewW + 40 && scr.y > -40 && scr.y < viewH + 40) {
           ctx.font = 'bold 11px "Courier New", monospace';
@@ -5261,6 +5855,15 @@
           ctx.fillText('! ПОДМОГА', Math.round(scr.x) + 1, Math.round(scr.y) + 1);
           ctx.fillStyle = blink ? '#f2da91' : '#a83c2e';
           ctx.fillText('! ПОДМОГА', Math.round(scr.x), Math.round(scr.y));
+        }
+      } else if (t.aiState === 'no_ammo_retreat') {
+        const scr = worldToScreen(t.x, t.y - 26);
+        if (scr.x > -40 && scr.x < viewW + 40 && scr.y > -40 && scr.y < viewH + 40) {
+          ctx.font = 'bold 10px "Courier New", monospace';
+          ctx.fillStyle = '#140f0c';
+          ctx.fillText('ПУСТО!', Math.round(scr.x) + 1, Math.round(scr.y) + 1);
+          ctx.fillStyle = '#d6ae52';
+          ctx.fillText('ПУСТО!', Math.round(scr.x), Math.round(scr.y));
         }
       } else if (t.tough) {
         const scr = worldToScreen(t.x, t.y - 24);
@@ -5298,11 +5901,30 @@
   function getEditorGhostStub(tpl, w, h) {
     const key = `${tpl.type}|${w}x${h}`;
     if (!editorGhostCache[key]) {
-      const stub = { id: 'ghost_' + key, x: 0, y: 0, w: w, h: h, mat: tpl.mat, type: tpl.type, high: tpl.high, isCover: true };
-      if (tpl.type !== 'water_barrel' && world && world.bakeSolidSprites) {
-        world.bakeSolidSprites([stub], []);
+      const knd = tpl.kind || 'solid';
+      if (knd === 'tree') {
+        const tr = { x: 0, y: 0, r: tpl.r || 22 };
+        if (world && world.bakeSolidSprites) world.bakeSolidSprites([], [tr]);
+        editorGhostCache[key] = { kind: 'tree', baked: tr.baked };
+      } else {
+        const stub = {
+          id: 'ghost_' + key,
+          x: 0,
+          y: 0,
+          w: w,
+          h: h,
+          mat: tpl.mat,
+          type: tpl.type,
+          high: tpl.high,
+          isCover: true,
+          isHitchingPost: !!tpl.isHitchingPost,
+          interior: !!tpl.interior
+        };
+        if (tpl.type !== 'water_barrel' && world && world.bakeSolidSprites) {
+          world.bakeSolidSprites([stub], []);
+        }
+        editorGhostCache[key] = stub;
       }
-      editorGhostCache[key] = stub;
     }
     return editorGhostCache[key];
   }
@@ -5325,24 +5947,50 @@
     }
 
     const wm = screenToWorld(state.input.mouseX, state.input.mouseY);
-    const hoverSolid = world.findSolidAtPoint ? world.findSolidAtPoint(wm.x, wm.y) : null;
-    ed.hoverSolidId = hoverSolid ? hoverSolid.id : null;
+    const hoverHit = world.findEditorEntityAt ? world.findEditorEntityAt(wm.x, wm.y) : null;
+    ed.hoverEntity = hoverHit;
+    ed.hoverSolidId = (hoverHit && hoverHit.kind === 'solid' && hoverHit.obj) ? hoverHit.obj.id : null;
 
     if (ed.tool === 'place') {
       const box = getEditorPlaceBox();
       if (box) {
-        const stub = getEditorGhostStub(box.tpl, box.w, box.h);
+        const knd = box.tpl.kind || 'solid';
         g.globalAlpha = 0.56;
-        if (stub.type === 'water_barrel') {
-          const bc = getBarrelCaches(box.w, box.h);
-          g.fillStyle = P.water[2];
-          drawPixelDisc(g, box.x + bc.cx, box.y + bc.cy, bc.waterR);
-          g.drawImage(bc.shell, box.x, box.y);
-        } else if (stub.baked && stub.baked.canvas) {
-          g.drawImage(stub.baked.canvas, Math.round(box.x + stub.baked.ox), Math.round(box.y + stub.baked.oy));
-        } else {
-          g.fillStyle = P.woodWarm[1];
-          g.fillRect(box.x, box.y, box.w, box.h);
+        if (knd === 'solid') {
+          const stub = getEditorGhostStub(box.tpl, box.w, box.h);
+          if (stub.type === 'water_barrel') {
+            const bc = getBarrelCaches(box.w, box.h);
+            g.fillStyle = P.water[2];
+            drawPixelDisc(g, box.x + bc.cx, box.y + bc.cy, bc.waterR);
+            g.drawImage(bc.shell, box.x, box.y);
+          } else if (stub.baked && stub.baked.canvas) {
+            g.drawImage(stub.baked.canvas, Math.round(box.x + stub.baked.ox), Math.round(box.y + stub.baked.oy));
+          } else {
+            g.fillStyle = P.woodWarm[1];
+            g.fillRect(box.x, box.y, box.w, box.h);
+          }
+        } else if (knd === 'tree') {
+          const stub = getEditorGhostStub(box.tpl, box.w, box.h);
+          if (stub.baked && stub.baked.canvas) {
+            g.drawImage(stub.baked.canvas, Math.round(box.cx + stub.baked.ox), Math.round(box.cy + stub.baked.oy));
+          }
+        } else if (knd === 'pole') {
+          g.fillStyle = P.woodWarm[2];
+          g.fillRect(box.cx - 2, box.cy - 6, 4, 12);
+        } else if (knd === 'bottle') {
+          g.fillStyle = P.foliage[1];
+          g.fillRect(box.cx - 2, box.cy - 3, 4, 6);
+        } else if (knd === 'bandit') {
+          g.fillStyle = box.tpl.tough ? P.steelDark[3] : P.barnRed[1];
+          fillRoundPix(g, box.cx - 6, box.cy - 8, 12, 16);
+          g.fillStyle = P.brass[0];
+          g.fillRect(box.cx - 2, box.cy - 2, 4, 4);
+        } else if (knd === 'horse') {
+          g.fillStyle = P.leather[2];
+          fillRoundPix(g, box.cx - 12, box.cy - 6, 24, 12);
+        } else if (knd === 'sheep') {
+          g.fillStyle = P.cloud[0];
+          fillRoundPix(g, box.cx - 6, box.cy - 5, 12, 10);
         }
         g.globalAlpha = 0.92;
         g.fillStyle = P.brass[0];
@@ -5353,12 +6001,12 @@
       }
     }
 
-    // Красная пиксельная рамка подсветки объекта под курсором при инструменте Удалить (или для быстрого ПКМ-удаления)
-    if (hoverSolid && (ed.tool === 'erase' || hoverSolid)) {
-      const rx = Math.round(hoverSolid.x);
-      const ry = Math.round(hoverSolid.y);
-      const rw = Math.round(hoverSolid.w);
-      const rh = Math.round(hoverSolid.h);
+    // Красная пиксельная рамка подсветки редактируемого объекта под курсором (locked-здания и салун не подсвечиваются)
+    if (hoverHit) {
+      const rx = Math.round(hoverHit.x);
+      const ry = Math.round(hoverHit.y);
+      const rw = Math.round(hoverHit.w);
+      const rh = Math.round(hoverHit.h);
       g.globalAlpha = ed.tool === 'erase' ? 0.95 : 0.45;
       g.fillStyle = P.blood[0];
       g.fillRect(rx - 2, ry - 2, rw + 4, 2);
@@ -5501,15 +6149,31 @@
     }
   }
 
+  function drawFpsBadge() {
+    if (!G.CFG.debugRays) return;
+    const text = `FPS: ${curFps} (${curFrameMs.toFixed(1)} ms)`;
+    ctx.save();
+    ctx.font = 'bold 11px "Courier New", monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    const bw = Math.ceil(ctx.measureText(text).width) + 12;
+    const bh = 18;
+    const bx = 12;
+    const by = 12;
+    ctx.fillStyle = 'rgba(20, 15, 12, 0.88)';
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.strokeStyle = '#c89e45';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+    ctx.fillStyle = curFps >= 50 ? '#8ea164' : (curFps >= 30 ? '#f2da91' : '#c9241c');
+    ctx.fillText(text, bx + 6, by + 4);
+    ctx.restore();
+  }
+
   function drawNoonVignette() {
-    const grad = ctx.createRadialGradient(
-      viewW * 0.5, viewH * 0.5, Math.min(viewW, viewH) * 0.34,
-      viewW * 0.5, viewH * 0.5, Math.max(viewW, viewH) * 0.72
-    );
-    grad.addColorStop(0, 'rgba(255, 232, 185, 0.0)');
-    grad.addColorStop(1, 'rgba(24, 16, 11, 0.28)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, viewW, viewH);
+    if (vignetteCanvas.width > 0 && vignetteCanvas.height > 0) {
+      ctx.drawImage(vignetteCanvas, 0, 0);
+    }
   }
 
   // Короткий красный акцент по краям экрана при попадании (ступенчатые полосы, без градиентов)
@@ -5616,7 +6280,11 @@
     if (isClient && ed.active && G.SIM && G.SIM.toggleEditorMode) {
       G.SIM.toggleEditorMode(state, world, false);
     }
-    const key = `${ed.active}|${ed.tool}|${ed.selectedType}|${ed.rotated}|${isClient}`;
+    const activeTab = ed.tab || 'objects';
+    if (activeTab !== lastEditorTab) {
+      buildEditorPaletteDOM();
+    }
+    const key = `${ed.active}|${ed.tool}|${activeTab}|${ed.selectedType}|${ed.rotated}|${isClient}`;
     if (key === lastEditorKey) return;
     lastEditorKey = key;
 
@@ -5631,6 +6299,8 @@
       ui.btnEditorErase.classList.toggle('active', ed.tool === 'erase');
       ui.btnEditorErase.classList.toggle('btn-warn', ed.tool === 'erase');
     }
+    if (ui.btnEditorTabObjects) ui.btnEditorTabObjects.classList.toggle('active', activeTab === 'objects');
+    if (ui.btnEditorTabNpc) ui.btnEditorTabNpc.classList.toggle('active', activeTab === 'npc');
     if (ui.btnEditorRotate) {
       ui.btnEditorRotate.textContent = ed.rotated ? 'Повернуть [Q]: ВЕРТ' : 'Повернуть [Q]';
     }
@@ -5698,24 +6368,45 @@
     }
   }
 
-  function updateHUD() {
+  function updateHUD(dt) {
     const p = state.player;
     const w = G.SIM.getWeapon(state);
     const ws = G.SIM.getWState(state);
 
     if (ui.hpBarFill) {
-      const curHp = Math.max(0, p.hp !== undefined ? p.hp : 100);
-      const maxHp = p.maxHp || 100;
-      const pct = Math.round((curHp / maxHp) * 100);
-      ui.hpBarFill.style.width = `${pct}%`;
-      if (pct > 50) {
-        ui.hpBarFill.style.background = '#6d824d';
-      } else if (pct > 25) {
-        ui.hpBarFill.style.background = '#c89e45';
+      const P = getPal();
+      if (G.CFG && G.CFG.godMode) {
+        ui.hpBarFill.style.width = '100%';
+        ui.hpBarFill.style.background = (P.brass && P.brass[0]) || '#f2da91';
+        if (ui.hpNum) ui.hpNum.textContent = '∞';
       } else {
-        ui.hpBarFill.style.background = '#c9241c';
+        const curHp = Math.max(0, p.hp !== undefined ? p.hp : 100);
+        const maxHp = p.maxHp || 100;
+        const pct = Math.round((curHp / maxHp) * 100);
+        ui.hpBarFill.style.width = `${pct}%`;
+        if (pct > 50) {
+          ui.hpBarFill.style.background = '#6d824d';
+        } else if (pct > 25) {
+          ui.hpBarFill.style.background = '#c89e45';
+        } else {
+          ui.hpBarFill.style.background = '#c9241c';
+        }
+        if (ui.hpNum) ui.hpNum.textContent = `${Math.round(curHp)} / ${maxHp}`;
       }
-      if (ui.hpNum) ui.hpNum.textContent = `${Math.round(curHp)} / ${maxHp}`;
+    }
+
+    if (ui.horseHudRow) {
+      const hr = world && world.horse;
+      const showHorse = !!(p.mountedHorse && hr && hr.state !== 'dead');
+      ui.horseHudRow.classList.toggle('hidden', !showHorse);
+      if (showHorse) {
+        const hHp = Math.max(0, Math.round(hr.hp || 0));
+        const hMax = hr.maxHp || 150;
+        const hCalm = Math.max(0, Math.round(hr.calm !== undefined ? hr.calm : 100));
+        if (ui.horseHpFill) ui.horseHpFill.style.width = `${Math.round((hHp / hMax) * 100)}%`;
+        if (ui.horseCalmFill) ui.horseCalmFill.style.width = `${hCalm}%`;
+        if (ui.horseHudVal) ui.horseHudVal.textContent = `${hHp} HP`;
+      }
     }
 
     if (ui.zoneName) ui.zoneName.textContent = state.zoneLabel || 'САЛУН';
@@ -5747,7 +6438,11 @@
 
     updateHatMenuUI();
     updateEditorUI();
-    updateNetUI();
+    netUiTimer += (dt || 0.016);
+    if (netUiTimer >= 0.25) {
+      netUiTimer = 0;
+      updateNetUI();
+    }
 
     if (ui.statusLine) {
       if (state.editor && state.editor.active) {
@@ -5758,6 +6453,10 @@
       } else if (p.drinking) {
         const pctD = Math.round(G.MATH.clamp((p.drinkTimer || 0) / (p.drinkDur || 1.8), 0, 1) * 100);
         ui.statusLine.textContent = `БУРБОН: ${pctD}% (ВОССТАНОВЛЕНИЕ)`;
+      } else if (p.stunTimer > 0) {
+        ui.statusLine.textContent = 'ОГЛУШЁН!';
+      } else if (p.mountedHorse) {
+        ui.statusLine.textContent = 'ВЕРХОМ НА ЛОШАДИ ([E] СЛЕЗТЬ)';
       } else if (p.rolling) {
         ui.statusLine.textContent = 'ПЕРЕКАТ';
       } else if (ws.reloading) {
@@ -5908,9 +6607,21 @@
 
   // ==================== ГЛАВНЫЙ ЦИКЛ ====================
 
+  const _playersDrawBuf = [];
+
   function renderFrame(dt) {
     const zoom = getZoom();
     const org = getCamOrigin();
+    if (state) {
+      if (!state.viewRect) {
+        state.viewRect = { x: org.x, y: org.y, w: pixW, h: pixH };
+      } else {
+        state.viewRect.x = org.x;
+        state.viewRect.y = org.y;
+        state.viewRect.w = pixW;
+        state.viewRect.h = pixH;
+      }
+    }
 
     pctx.imageSmoothingEnabled = false;
     pctx.fillStyle = '#17120f';
@@ -5919,48 +6630,74 @@
     pctx.save();
     pctx.translate(-org.x, -org.y);
 
-    pctx.drawImage(world.bgCanvas, 0, 0);
+    if (world.bgCanvas) {
+      const sx = Math.max(0, Math.floor(org.x));
+      const sy = Math.max(0, Math.floor(org.y));
+      const ex = Math.min(world.bgCanvas.width, Math.ceil(org.x + pixW));
+      const ey = Math.min(world.bgCanvas.height, Math.ceil(org.y + pixH));
+      const sw = ex - sx;
+      const sh = ey - sy;
+      if (sw > 0 && sh > 0) {
+        pctx.drawImage(world.bgCanvas, sx, sy, sw, sh, sx, sy, sw, sh);
+      }
+    }
     drawSaloonDaylight(pctx);
 
     for (let i = 0; i < world.solids.length; i++) {
-      drawNoonShadow(pctx, world.solids[i]);
+      const s = world.solids[i];
+      const shLen = getShadowLength(s);
+      if (!isInView(s.x, s.y, s.w + Math.ceil(SUN.dx * shLen), s.h + Math.ceil(SUN.dy * shLen), org, 24)) continue;
+      drawNoonShadow(pctx, s);
     }
-    drawCloudShadows(pctx);
+    drawCloudShadows(pctx, org);
 
-    drawDecals(pctx);
-    drawBloodTrail(pctx);
-    drawPuddles(pctx);
-    drawDeadBandits(pctx);
-    drawShells(pctx);
-    drawFlyingHats(pctx);
+    drawDecals(pctx, org);
+    drawBloodTrail(pctx, org);
+    drawPuddles(pctx, org);
+    drawDeadBandits(pctx, org);
+    drawShells(pctx, org);
+    drawFlyingHats(pctx, org);
 
     for (let i = 0; i < world.solids.length; i++) {
-      if (!world.solids[i].high) drawSolid(pctx, world.solids[i]);
+      const s = world.solids[i];
+      if (!s.high && isInView(s.x, s.y, s.w, s.h, org, 48)) drawSolid(pctx, s);
     }
     drawSaloonInteractables(pctx);
 
-    drawTargets(pctx);
+    drawTargets(pctx, org);
     drawDoors(pctx);
+    drawSheep(pctx, org);
+    drawHorse(pctx, org);
 
-    const playersToDraw = (G.SIM && G.SIM.getPlayers) ? G.SIM.getPlayers(state).slice() : [state.player];
-    playersToDraw.sort((a, b) => ((a && a.y) || 0) - ((b && b.y) || 0));
-    for (let i = 0; i < playersToDraw.length; i++) {
-      if (playersToDraw[i]) drawPlayer(pctx, playersToDraw[i]);
+    const srcPlayers = (G.SIM && G.SIM.getPlayers) ? G.SIM.getPlayers(state) : [state.player];
+    if (srcPlayers.length <= 1) {
+      if (srcPlayers[0]) drawPlayer(pctx, srcPlayers[0]);
+    } else {
+      _playersDrawBuf.length = 0;
+      for (let i = 0; i < srcPlayers.length; i++) {
+        if (srcPlayers[i]) _playersDrawBuf.push(srcPlayers[i]);
+      }
+      _playersDrawBuf.sort((a, b) => (a.y || 0) - (b.y || 0));
+      for (let i = 0; i < _playersDrawBuf.length; i++) {
+        drawPlayer(pctx, _playersDrawBuf[i]);
+      }
     }
     drawBullets(pctx);
-    drawBloodDrops(pctx);
+    drawBloodDrops(pctx, org);
 
     for (let i = 0; i < world.solids.length; i++) {
-      if (world.solids[i].high) drawSolid(pctx, world.solids[i]);
+      const s = world.solids[i];
+      if (s.high && isInView(s.x, s.y, s.w, s.h, org, 48)) drawSolid(pctx, s);
     }
-    drawPolesAndWires(pctx);
-    drawTrees(pctx);
+    drawPolesAndWires(pctx, org);
+    drawTrees(pctx, org);
+    drawBirdFlocks(pctx, org);
 
-    drawParticles(pctx);
-    drawGunSmokeClouds(pctx);
-    drawDustMotes(pctx, dt);
+    drawParticles(pctx, org);
+    drawGunSmokeClouds(pctx, org);
+    drawDustMotes(pctx, dt, org);
     drawDustStorm(pctx, org);
-    drawMuzzleGlow(pctx);
+    drawMuzzleGlow(pctx, org);
     drawDebugRays(pctx);
     drawEditorOverlay(pctx, org);
 
@@ -5986,6 +6723,7 @@
     drawNoonVignette();
     drawHurtAccent();
     drawWorldOverlaysOnScreen();
+    drawFpsBadge();
     drawCrosshairs();
 
     updateReloadAnim(dt);
@@ -5993,9 +6731,12 @@
   }
 
   let lastTs = 0;
+  let fpsWorkAccum = 0;
   function loop(ts) {
-    const dt = lastTs ? Math.min(0.033, (ts - lastTs) / 1000) : 0.016;
+    const rawDt = lastTs ? Math.max(0.001, (ts - lastTs) / 1000) : 0.016;
+    const dt = Math.min(0.033, rawDt);
     lastTs = ts;
+    const tStart = (typeof performance !== 'undefined' && performance.now) ? performance.now() : ts;
 
     const wm = screenToWorld(state.input.mouseX, state.input.mouseY);
     state.input.worldMouseX = wm.x;
@@ -6007,7 +6748,19 @@
       G.SIM.update(state, world, dt);
     }
     renderFrame(dt);
-    updateHUD();
+    updateHUD(dt);
+
+    const tEnd = (typeof performance !== 'undefined' && performance.now) ? performance.now() : ts;
+    fpsAccum += rawDt;
+    fpsWorkAccum += Math.max(0.1, tEnd - tStart);
+    fpsFrames++;
+    if (fpsAccum >= 0.3) {
+      curFps = Math.round(fpsFrames / fpsAccum);
+      curFrameMs = fpsWorkAccum / fpsFrames;
+      fpsAccum = 0;
+      fpsWorkAccum = 0;
+      fpsFrames = 0;
+    }
 
     requestAnimationFrame(loop);
   }
@@ -6024,6 +6777,7 @@
     refreshKeybindLabels();
     syncSettingsUI();
     updateHUD();
+    updateNetUI();
     requestAnimationFrame(loop);
   }
 
