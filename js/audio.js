@@ -546,13 +546,86 @@
     playBirdsFlush() {
       if (!ensureCtx()) return;
       const now = ctx.currentTime;
-      for (let i = 0; i < 4; i++) {
-        const t = now + i * 0.055;
-        playNoise(t, 0.09, 'bandpass', 1750 + i * 220, 820, 0.12, 1.3);
+      for (let i = 0; i < 6; i++) {
+        const t = now + i * 0.048;
+        playNoise(t, 0.10, 'bandpass', 1550 + i * 210, 900, 0.19 - i * 0.018, 1.15);
       }
-      playTone(now + 0.02, 0.07, 'sine', 2450, 3150, 0.07);
-      playTone(now + 0.11, 0.08, 'sine', 2800, 2250, 0.06);
-      playTone(now + 0.20, 0.06, 'sine', 2600, 3200, 0.05);
+      playTone(now + 0.01, 0.075, 'triangle', 2400, 3250, 0.095);
+      playTone(now + 0.09, 0.085, 'sine', 2950, 2150, 0.085);
+      playTone(now + 0.18, 0.070, 'triangle', 2650, 3350, 0.075);
+      playTone(now + 0.25, 0.070, 'sine', 2500, 1950, 0.06);
+    },
+
+    playCrowCaw(x, y, listenerX, listenerY) {
+      if (!ensureCtx()) return;
+      const now = ctx.currentTime;
+      let att = 1.0;
+      let pan = 0;
+      if (x !== undefined && listenerX !== undefined) {
+        const dist = Math.hypot(x - listenerX, (y || 0) - (listenerY || 0));
+        if (dist > 680) return;
+        att = G.MATH.clamp(1.0 - Math.max(0, dist - 70) / 610, 0.10, 0.92);
+        pan = G.MATH.clamp((x - listenerX) / 360, -0.85, 0.85);
+      }
+      const dest = (Math.abs(pan) > 0.02 || att < 0.99) ? makePanner(pan) : masterGain;
+      // Двойное хриплое карканье через bandpass
+      for (let c = 0; c < 2; c++) {
+        const t = now + c * 0.17;
+        const f0 = 620 + Math.random() * 90;
+        playTone(t, 0.11, 'sawtooth', f0, f0 * 0.68, 0.12 * att, dest);
+        playNoise(t, 0.12, 'bandpass', 1380, 620, 0.095 * att, 2.2, dest);
+      }
+    },
+
+    playSnakeRattle(x, y, listenerX, listenerY) {
+      if (!ensureCtx()) return;
+      const now = ctx.currentTime;
+      let att = 1.0;
+      let pan = 0;
+      if (x !== undefined && listenerX !== undefined) {
+        const dist = Math.hypot(x - listenerX, (y || 0) - (listenerY || 0));
+        if (dist > 340) return;
+        att = G.MATH.clamp(1.0 - Math.max(0, dist - 40) / 300, 0.12, 0.95);
+        pan = G.MATH.clamp((x - listenerX) / 240, -0.85, 0.85);
+      }
+      const dest = (Math.abs(pan) > 0.02 || att < 0.99) ? makePanner(pan) : masterGain;
+      for (let i = 0; i < 6; i++) {
+        const t = now + i * 0.028;
+        playNoise(t, 0.024, 'bandpass', 5400 + (i % 2) * 1100, 3200, 0.095 * att, 3.2, dest);
+      }
+    },
+
+    playFireIgnite(x, y, listenerX, listenerY) {
+      if (!ensureCtx()) return;
+      const now = ctx.currentTime;
+      let att = 1.0;
+      let pan = 0;
+      if (x !== undefined && listenerX !== undefined) {
+        const dist = Math.hypot(x - listenerX, (y || 0) - (listenerY || 0));
+        if (dist > 720) return;
+        att = G.MATH.clamp(1.0 - Math.max(0, dist - 60) / 660, 0.14, 0.95);
+        pan = G.MATH.clamp((x - listenerX) / 360, -0.85, 0.85);
+      }
+      const dest = (Math.abs(pan) > 0.02 || att < 0.99) ? makePanner(pan) : masterGain;
+      playNoise(now, 0.28, 'bandpass', 620, 1450, 0.26 * att, 0.9, dest);
+      playTone(now, 0.18, 'triangle', 140, 62, 0.16 * att, dest);
+      playNoise(now + 0.10, 0.18, 'bandpass', 2400, 1200, 0.09 * att, 1.5, dest);
+    },
+
+    playFireCrackle(x, y, listenerX, listenerY) {
+      if (!ensureCtx()) return;
+      const now = ctx.currentTime;
+      let att = 1.0;
+      let pan = 0;
+      if (x !== undefined && listenerX !== undefined) {
+        const dist = Math.hypot(x - listenerX, (y || 0) - (listenerY || 0));
+        if (dist > 440) return;
+        att = G.MATH.clamp(1.0 - Math.max(0, dist - 50) / 390, 0.08, 0.65);
+        pan = G.MATH.clamp((x - listenerX) / 320, -0.85, 0.85);
+      }
+      const dest = (Math.abs(pan) > 0.02 || att < 0.99) ? makePanner(pan) : masterGain;
+      playNoise(now, 0.045, 'bandpass', 2800 + Math.random() * 1400, 1600, 0.055 * att, 2.4, dest);
+      playNoise(now + 0.05, 0.08, 'lowpass', 520, 240, 0.045 * att, 0.9, dest);
     },
 
     playHoofbeat(surface) {

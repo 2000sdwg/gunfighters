@@ -466,6 +466,19 @@
       hf: r2(sh.hitFlash || 0)
     })) : [];
 
+    const crowArr = (world && Array.isArray(world.crows)) ? world.crows.map((cr) => ({
+      id: cr.id, x: r1(cr.x), y: r1(cr.y), z: r1(cr.z || 0), a: r3(cr.angle || 0), st: cr.state || 'perched', wp: r2(cr.wingPhase || 0)
+    })) : [];
+    const snakeArr = (world && Array.isArray(world.snakes)) ? world.snakes.map((sn) => ({
+      id: sn.id, x: r1(sn.x), y: r1(sn.y), a: r3(sn.angle || 0), hp: r1(sn.hp || 0), al: sn.alive ? 1 : 0, st: sn.state || 'idle', ph: r2(sn.phase || 0)
+    })) : [];
+    const lampArr = (world && Array.isArray(world.oilLamps)) ? world.oilLamps.map((lm) => ({
+      id: lm.id, x: Math.round(lm.x), y: Math.round(lm.y), al: lm.alive ? 1 : 0
+    })) : [];
+    const oilArr = (world && Array.isArray(world.oilPuddles)) ? world.oilPuddles.map((pd) => ({
+      id: pd.id, x: Math.round(pd.x), y: Math.round(pd.y), r: r1(pd.r), tr: Math.round(pd.targetR || pd.r), al: r2(pd.alpha !== undefined ? pd.alpha : 1), br: pd.burning ? 1 : 0, bt: r1(pd.burnTimer || 0)
+    })) : [];
+
     return {
       t: 'snap',
       seq: ++session.snapSeq,
@@ -482,6 +495,10 @@
       dr: doors,
       hr: hrSnap,
       sh: sheepArr,
+      cr: crowArr,
+      sn: snakeArr,
+      ol: lampArr,
+      op: oilArr,
       bl: bullets,
       ev: events
     };
@@ -523,6 +540,22 @@
     return pl;
   }
 
+  function exportNetworkExtras(world) {
+    if (!world) return undefined;
+    return {
+      playerSpawn: world.playerSpawn ? { x: world.playerSpawn.x, y: world.playerSpawn.y } : undefined,
+      terrainTiles: Array.isArray(world.terrainTiles) && world.terrainTiles.length ? world.terrainTiles : undefined,
+      interactables: Array.isArray(world.interactables) ? world.interactables : undefined,
+      civilians: Array.isArray(world.civilians) ? world.civilians : undefined,
+      zones: Array.isArray(world.zones) ? world.zones : undefined,
+      doors: Array.isArray(world.doors) ? world.doors.map((d) => ({
+        pairId: d.pairId || '', isDefault: !!d.isDefault, locked: !!d.locked,
+        hingeX: d.hingeX, hingeY: d.hingeY, len: d.len, baseAngle: d.baseAngle,
+        tagId: d.tagId || '', requiresUnlock: d.requiresUnlock || ''
+      })) : undefined
+    };
+  }
+
   function sendWelcomeToEntry(state, world, entry) {
     safeSend(entry.sendFn, {
       t: 'welcome',
@@ -532,7 +565,8 @@
       friendlyFire: !!state.friendlyFire,
       solids: world && world.exportSolidsList ? world.exportSolidsList() : [],
       trees: world && world.exportTreesList ? world.exportTreesList() : undefined,
-      poles: world && world.exportPolesList ? world.exportPolesList() : undefined
+      poles: world && world.exportPolesList ? world.exportPolesList() : undefined,
+      extra: exportNetworkExtras(world)
     });
     safeSend(entry.sendFn, buildSnapshot(state, world));
   }
@@ -692,6 +726,12 @@
         if (world && world.flushBirdFlocksNear) world.flushBirdFlocksNear(ev.x, ev.y, ev.r || 300, state);
       } else if (ev.kind === 'sheep_bleat') {
         if (G.AUDIO && G.AUDIO.playSheepBleat) G.AUDIO.playSheepBleat(ev.x, ev.y, lx, ly);
+      } else if (ev.kind === 'crow_caw') {
+        if (G.AUDIO && G.AUDIO.playCrowCaw) G.AUDIO.playCrowCaw(ev.x, ev.y, lx, ly);
+      } else if (ev.kind === 'snake_rattle') {
+        if (G.AUDIO && G.AUDIO.playSnakeRattle) G.AUDIO.playSnakeRattle(ev.x, ev.y, lx, ly);
+      } else if (ev.kind === 'fire_ignite') {
+        if (G.AUDIO && G.AUDIO.playFireIgnite) G.AUDIO.playFireIgnite(ev.x, ev.y, lx, ly);
       }
     }
   }
@@ -1006,6 +1046,29 @@
       world.sheep = nextSheep;
     }
 
+    if (world && Array.isArray(snap.cr)) {
+      world.crows = snap.cr.map((cs) => ({
+        id: cs.id, x: cs.x, y: cs.y, homeX: cs.x, homeY: cs.y, z: cs.z || 0, angle: cs.a || 0,
+        state: cs.st || 'perched', wingPhase: cs.wp || 0
+      }));
+    }
+    if (world && Array.isArray(snap.sn)) {
+      world.snakes = snap.sn.map((ss) => ({
+        id: ss.id, x: ss.x, y: ss.y, homeX: ss.x, homeY: ss.y, r: 8, angle: ss.a || 0,
+        hp: ss.hp, maxHp: 15, alive: !!ss.al, state: ss.st || 'idle', phase: ss.ph || 0
+      }));
+    }
+    if (world && Array.isArray(snap.ol)) {
+      world.oilLamps = snap.ol.map((ls) => ({
+        id: ls.id, x: ls.x, y: ls.y, r: 6, alive: !!ls.al, flickerSeed: 1
+      }));
+    }
+    if (world && Array.isArray(snap.op)) {
+      world.oilPuddles = snap.op.map((ps) => ({
+        id: ps.id, x: ps.x, y: ps.y, r: ps.r, targetR: ps.tr || ps.r, alpha: ps.al !== undefined ? ps.al : 1, burning: !!ps.br, burnTimer: ps.bt || 0, maxBurn: 9.0
+      }));
+    }
+
     // 6. Летящие пули
     if (Array.isArray(snap.bl)) {
       state.bullets = snap.bl.map((b) => ({
@@ -1034,6 +1097,7 @@
       state.localPlayerId = msg.yourId;
       state.mpMode = msg.mpMode || 'coop';
       state.friendlyFire = !!msg.friendlyFire;
+      state.screen = 'playing';
       if (state.editor && state.editor.active && G.SIM && G.SIM.toggleEditorMode) {
         G.SIM.toggleEditorMode(state, world, false);
       }
@@ -1051,7 +1115,7 @@
         world.applyNetworkSolids(msg.solids, state);
       }
       if (world && world.applyNetworkProps) {
-        world.applyNetworkProps(msg.trees, msg.poles);
+        world.applyNetworkProps(msg.trees, msg.poles, msg.extra);
       }
 
       session.roomCode = msg.roomCode || session.roomCode;
@@ -1066,7 +1130,7 @@
     if (msg.t === 'map_sync') {
       if (world && world.applyNetworkSolids && Array.isArray(msg.solids)) {
         world.applyNetworkSolids(msg.solids, state);
-        if (world.applyNetworkProps) world.applyNetworkProps(msg.trees, msg.poles);
+        if (world.applyNetworkProps) world.applyNetworkProps(msg.trees, msg.poles, msg.extra);
         if (G.SIM && G.SIM.showToast) G.SIM.showToast(state, 'ХОСТ ОБНОВИЛ КАРТУ', 1.3);
       }
       return;
@@ -1199,12 +1263,15 @@
     if (session.role !== 'client' || !session.clientHostPeer || !session.clientHostPeer.sendFn) return;
     const inp = state.input || { keys: {}, worldMouseX: 150, worldMouseY: 360, lmb: false, rmb: false };
     const compactKeys = {};
-    if (inp.keys) {
+    const allowInput = !state.screen || state.screen === 'playing';
+    if (allowInput && inp.keys) {
       Object.keys(inp.keys).forEach((k) => {
         if (inp.keys[k]) compactKeys[k] = 1;
       });
     }
-    const sig = JSON.stringify([compactKeys, Math.round(inp.worldMouseX), Math.round(inp.worldMouseY), !!inp.lmb, !!inp.rmb]);
+    const sendLmb = allowInput ? !!inp.lmb : false;
+    const sendRmb = allowInput ? !!inp.rmb : false;
+    const sig = JSON.stringify([compactKeys, Math.round(inp.worldMouseX), Math.round(inp.worldMouseY), sendLmb, sendRmb]);
     if (!force && sig === session.lastInputSig && session.inputAccum < INPUT_INTERVAL) return;
     if (force || session.inputAccum >= INPUT_INTERVAL) {
       session.inputAccum = 0;
@@ -1215,8 +1282,8 @@
         keys: compactKeys,
         mx: Math.round(inp.worldMouseX),
         my: Math.round(inp.worldMouseY),
-        lmb: !!inp.lmb,
-        rmb: !!inp.rmb
+        lmb: sendLmb,
+        rmb: sendRmb
       });
     }
   }
@@ -1669,7 +1736,8 @@
       t: 'map_sync',
       solids: world.exportSolidsList(),
       trees: world.exportTreesList ? world.exportTreesList() : undefined,
-      poles: world.exportPolesList ? world.exportPolesList() : undefined
+      poles: world.exportPolesList ? world.exportPolesList() : undefined,
+      extra: exportNetworkExtras(world)
     });
   }
 

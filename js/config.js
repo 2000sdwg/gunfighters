@@ -139,9 +139,10 @@
     debugRays: false,
     godMode: false,
 
-    // Прогресс игрока (убийства и выбранная шляпа)
+    // Прогресс игрока (убийства, награды и выбранная шляпа)
     kills: 0,
     selectedHat: 'classic',
+    unlocks: [],
     playerName: 'СТРЕЛОК'
   };
 
@@ -236,11 +237,31 @@
     return (G.CFG.kills || 0) >= (def.kills || 0);
   };
 
+  G.isUnlocked = function (key, state) {
+    if (!key) return true;
+    const isStory = !!(state && state.storyMode);
+    if (!isStory) return true;
+    const list = (G.CFG && Array.isArray(G.CFG.unlocks)) ? G.CFG.unlocks : [];
+    return list.indexOf(key) !== -1;
+  };
+
+  G.grantUnlock = function (key) {
+    if (!key) return false;
+    if (!Array.isArray(G.CFG.unlocks)) G.CFG.unlocks = [];
+    if (G.CFG.unlocks.indexOf(key) === -1) {
+      G.CFG.unlocks.push(String(key));
+      G.saveProgress();
+      return true;
+    }
+    return false;
+  };
+
   G.saveProgress = function () {
     try {
       localStorage.setItem(PROGRESS_KEY, JSON.stringify({
         kills: G.CFG.kills || 0,
-        selectedHat: G.CFG.selectedHat || 'classic'
+        selectedHat: G.CFG.selectedHat || 'classic',
+        unlocks: Array.isArray(G.CFG.unlocks) ? G.CFG.unlocks : []
       }));
     } catch (_) {}
   };
@@ -256,6 +277,9 @@
       if (typeof p.selectedHat === 'string') {
         const def = G.getHatDef(p.selectedHat);
         G.CFG.selectedHat = G.isHatUnlocked(def.id) ? def.id : 'classic';
+      }
+      if (Array.isArray(p.unlocks)) {
+        G.CFG.unlocks = p.unlocks.filter((u) => typeof u === 'string' && u.length > 0);
       }
     } catch (_) {}
   };
@@ -584,6 +608,8 @@
       rollDx: 0,
       rollDy: 0,
       stunTimer: 0,
+      snakeSlowTimer: 0,
+      fireDmgCd: 0,
       mountedHorse: false,
       knockVx: 0,
       knockVy: 0,
@@ -679,6 +705,10 @@
       zoneLabel: 'САЛУН',
       echoDesc: 'ЗАКРЫТОЕ ПОМЕЩЕНИЕ',
       localPlayerId: localId,
+      screen: 'menu', // 'menu' | 'playing' | 'paused' | 'editor'
+      storyMode: false,
+      currentMapId: 'default',
+      currentMapName: 'Полуденный городок (Стандартная)',
       players: {
         [localId]: localPlayer
       },
@@ -732,11 +762,15 @@
       },
       editor: {
         active: false,
-        tool: 'place', // 'place' | 'erase'
-        tab: 'objects', // 'objects' | 'npc'
+        tool: 'place', // 'place' | 'move' | 'erase'
+        tab: 'objects', // 'terrain' | 'buildings' | 'objects' | 'npc'
         selectedType: 'crate',
         rotated: false,
-        gridStep: 8,
+        gridStep: 4,
+        brushSize: 1,
+        selectedEntity: null,
+        pendingTagId: '',
+        pendingRequiresUnlock: '',
         hoverSolidId: null,
         hoverEntity: null,
         camX: 250,

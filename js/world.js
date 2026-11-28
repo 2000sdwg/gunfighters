@@ -367,35 +367,268 @@
   const MAP_W = 3360;
   const MAP_H = 960;
   const MAP_STORAGE_KEY = 'gunfighter_custom_map_v2';
+  const MAPS_STORAGE_KEY = 'gunfighter_maps_library_v1';
+  const MAPS_MIGRATED_KEY = 'gunfighter_maps_migrated_v1';
+  const DEFAULT_MAP_NAME = 'Полуденный городок (Стандартная)';
+
+  function normalizeMapObj(raw, opts) {
+    const src = Array.isArray(raw) ? { solids: raw, isBlank: false } : (raw && typeof raw === 'object' ? raw : {});
+    const isBlank = src.isBlank !== undefined ? !!src.isBlank : !!(opts && opts.isBlank);
+    const w = G.MATH.clamp(Math.round(src.width || (opts && opts.width) || (isBlank ? 1400 : MAP_W)), 640, 4800);
+    const h = G.MATH.clamp(Math.round(src.height || (opts && opts.height) || (isBlank ? 840 : MAP_H)), 480, 2400);
+    const baseTerrain = ['dirt', 'canyon', 'grass', 'wood'].includes(src.baseTerrain)
+      ? src.baseTerrain
+      : ((opts && ['dirt', 'canyon', 'grass', 'wood'].includes(opts.baseTerrain)) ? opts.baseTerrain : 'dirt');
+    const sp = (src.playerSpawn && typeof src.playerSpawn.x === 'number' && typeof src.playerSpawn.y === 'number')
+      ? { x: Math.round(src.playerSpawn.x), y: Math.round(src.playerSpawn.y) }
+      : (isBlank ? { x: Math.round(w * 0.5), y: Math.round(h * 0.5) } : { x: 215, y: 400 });
+
+    let normTiles = [];
+    if (Array.isArray(src.terrainTiles)) {
+      normTiles = src.terrainTiles
+        .filter((t) => t && typeof t.tx === 'number' && typeof t.ty === 'number' && typeof t.type === 'string')
+        .map((t) => ({ tx: Math.floor(t.tx), ty: Math.floor(t.ty), type: String(t.type) }));
+    } else if (src.terrainTiles && typeof src.terrainTiles === 'object') {
+      Object.keys(src.terrainTiles).forEach((k) => {
+        const parts = k.split(',');
+        const tx = parseInt(parts[0], 10);
+        const ty = parseInt(parts[1], 10);
+        const tp = src.terrainTiles[k];
+        if (!isNaN(tx) && !isNaN(ty) && typeof tp === 'string' && tp) {
+          normTiles.push({ tx, ty, type: tp });
+        }
+      });
+    }
+
+    const outObj = {
+      version: 4,
+      id: String(src.id || ('map_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 900 + 100))),
+      name: String(src.name || (opts && opts.name) || 'Пользовательская карта').slice(0, 48),
+      isBlank: isBlank,
+      width: w,
+      height: h,
+      baseTerrain: baseTerrain,
+      playerSpawn: sp,
+      terrainTiles: normTiles,
+      solids: Array.isArray(src.solids) ? src.solids.slice() : [],
+      doors: Array.isArray(src.doors) ? src.doors.slice() : [],
+      interactables: Array.isArray(src.interactables) ? src.interactables.slice() : null,
+      trees: Array.isArray(src.trees) ? src.trees.slice() : [],
+      poles: Array.isArray(src.poles) ? src.poles.slice() : [],
+      bottles: Array.isArray(src.bottles) ? src.bottles.slice() : [],
+      oilLamps: Array.isArray(src.oilLamps) ? src.oilLamps.slice() : [],
+      bandits: Array.isArray(src.bandits) ? src.bandits.slice() : [],
+      horse: src.horse !== undefined ? src.horse : null,
+      sheep: Array.isArray(src.sheep) ? src.sheep.slice() : [],
+      crows: Array.isArray(src.crows) ? src.crows.slice() : [],
+      snakes: Array.isArray(src.snakes) ? src.snakes.slice() : [],
+      zones: Array.isArray(src.zones) ? src.zones.slice() : [],
+      civilians: Array.isArray(src.civilians) ? src.civilians.slice() : []
+    };
+    if (!outObj.interactables) delete outObj.interactables;
+    return outObj;
+  }
+
+  function readMapsLibraryRaw() {
+    let list = [];
+    try {
+      const rawLib = localStorage.getItem(MAPS_STORAGE_KEY);
+      if (rawLib) {
+        const parsed = JSON.parse(rawLib);
+        if (Array.isArray(parsed)) {
+          list = parsed.map((m) => normalizeMapObj(m));
+        }
+      }
+    } catch (_) {}
+
+    // Автоматическая миграция старой карты из gunfighter_custom_map_v2
+    try {
+      const migrated = localStorage.getItem(MAPS_MIGRATED_KEY);
+      if (!migrated) {
+        const oldRaw = localStorage.getItem(MAP_STORAGE_KEY);
+        if (oldRaw) {
+          const oldParsed = JSON.parse(oldRaw);
+          if (oldParsed && (Array.isArray(oldParsed) || Array.isArray(oldParsed.solids))) {
+            const migratedMap = normalizeMapObj(oldParsed, {
+              name: 'Моя карта (перенесено)',
+              isBlank: false,
+              width: MAP_W,
+              height: MAP_H,
+              baseTerrain: 'dirt'
+            });
+            migratedMap.id = 'map_migrated_v2';
+            if (!list.some((m) => m.id === migratedMap.id)) {
+              list.unshift(migratedMap);
+            }
+            localStorage.setItem(MAPS_STORAGE_KEY, JSON.stringify(list));
+          }
+        }
+        localStorage.setItem(MAPS_MIGRATED_KEY, '1');
+      }
+    } catch (_) {}
+    return list;
+  }
+
+  function writeMapsLibrary(list) {
+    try {
+      localStorage.setItem(MAPS_STORAGE_KEY, JSON.stringify(list));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  G.MAPS = {
+    list() {
+      return readMapsLibraryRaw();
+    },
+    get(id) {
+      if (!id || id === 'default') return null;
+      const list = readMapsLibraryRaw();
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].id === id) return list[i];
+      }
+      return null;
+    },
+    save(mapObj) {
+      if (!mapObj) return null;
+      const norm = normalizeMapObj(mapObj);
+      if (!norm.id || norm.id === 'default') {
+        norm.id = 'map_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 900 + 100);
+      }
+      const list = readMapsLibraryRaw();
+      const idx = list.findIndex((m) => m.id === norm.id);
+      if (idx >= 0) list[idx] = norm;
+      else list.unshift(norm);
+      writeMapsLibrary(list);
+      return norm;
+    },
+    remove(id) {
+      if (!id || id === 'default') return false;
+      const list = readMapsLibraryRaw();
+      const next = list.filter((m) => m.id !== id);
+      if (next.length === list.length) return false;
+      writeMapsLibrary(next);
+      return true;
+    },
+    exportJson(mapObj) {
+      return JSON.stringify(normalizeMapObj(mapObj), null, 2);
+    },
+    importJson(str) {
+      const parsed = JSON.parse(String(str || ''));
+      if (!parsed || (typeof parsed !== 'object' && !Array.isArray(parsed))) {
+        throw new Error('Некорректный JSON карты');
+      }
+      const norm = normalizeMapObj(parsed, {
+        name: (parsed && parsed.name) ? parsed.name : 'Импорт карты'
+      });
+      // Всегда выдаём свежий ID, чтобы импорт не перезаписал существующую карту без спроса
+      const existing = readMapsLibraryRaw();
+      if (existing.some((m) => m.id === norm.id)) {
+        norm.id = 'map_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 900 + 100);
+      }
+      return G.MAPS.save(norm);
+    },
+    createBlank(opts) {
+      const o = opts || {};
+      const w = G.MATH.clamp(Math.round(o.width || 1400), 640, 4800);
+      const h = G.MATH.clamp(Math.round(o.height || 840), 480, 2400);
+      const baseTerrain = ['dirt', 'canyon', 'grass', 'wood'].includes(o.baseTerrain) ? o.baseTerrain : 'dirt';
+      return normalizeMapObj({
+        id: 'map_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 900 + 100),
+        name: String(o.name || 'Новая карта').slice(0, 48),
+        isBlank: true,
+        width: w,
+        height: h,
+        baseTerrain: baseTerrain,
+        playerSpawn: { x: Math.round(w * 0.5), y: Math.round(h * 0.5) },
+        solids: [],
+        trees: [],
+        poles: [],
+        bottles: [],
+        oilLamps: [],
+        bandits: [],
+        horse: null,
+        sheep: [],
+        crows: [],
+        snakes: []
+      });
+    },
+    normalize: normalizeMapObj
+  };
 
   G.EDITOR_PALETTE = [
-    // Предметы окружения
-    { category: 'objects', kind: 'solid', type: 'crate',         label: 'Ящик',           w: 34,  h: 32, mat: 'wood',  high: false, rotatable: false },
-    { category: 'objects', kind: 'solid', type: 'water_barrel',  label: 'Бочка',          w: 26,  h: 26, mat: 'water', high: false, rotatable: false },
-    { category: 'objects', kind: 'solid', type: 'hay',           label: 'Тюк сена',       w: 34,  h: 26, mat: 'hay',   high: false, rotatable: false },
-    { category: 'objects', kind: 'solid', type: 'trough',        label: 'Корыто',         w: 56,  h: 22, mat: 'water', high: false, rotatable: true },
-    { category: 'objects', kind: 'solid', type: 'fence',         label: 'Забор',          w: 96,  h: 12, mat: 'wood',  high: false, rotatable: true },
-    { category: 'objects', kind: 'solid', type: 'low_wall',      label: 'Кам. стена',     w: 80,  h: 14, mat: 'rock',  high: false, rotatable: true },
-    { category: 'objects', kind: 'solid', type: 'boulder',       label: 'Валун',          w: 46,  h: 42, mat: 'rock',  high: false, rotatable: false },
-    { category: 'objects', kind: 'solid', type: 'wagon',         label: 'Повозка',        w: 62,  h: 28, mat: 'wood',  high: true,  rotatable: true },
-    { category: 'objects', kind: 'solid', type: 'table',         label: 'Стол',           w: 46,  h: 46, mat: 'wood',  high: false, rotatable: false },
-    { category: 'objects', kind: 'solid', type: 'wall',          label: 'Выс. стена',     w: 96,  h: 16, mat: 'wood',  high: true,  rotatable: true },
-    { category: 'objects', kind: 'solid', type: 'pillar',        label: 'Столб',          w: 18,  h: 18, mat: 'wood',  high: true,  rotatable: false },
-    { category: 'objects', kind: 'solid', type: 'anvil',         label: 'Наковальня',     w: 20,  h: 16, mat: 'metal', high: false, rotatable: false },
-    { category: 'objects', kind: 'solid', type: 'hitching_post', label: 'Коновязь',       w: 46,  h: 10, mat: 'wood',  high: false, rotatable: false, isHitchingPost: true },
-    { category: 'objects', kind: 'solid', type: 'water_tower',   label: 'Вод. башня',     w: 58,  h: 66, mat: 'wood',  high: true,  rotatable: false },
-    { category: 'objects', kind: 'solid', type: 'cliff',         label: 'Скала',          w: 120, h: 88, mat: 'rock',  high: true,  rotatable: true, interior: true },
-    { category: 'objects', kind: 'tree',  type: 'tree',          label: 'Дерево',         w: 44,  h: 44, r: 22, rotatable: false },
-    { category: 'objects', kind: 'pole',  type: 'pole',          label: 'Тел. столб',     w: 16,  h: 16, rotatable: false },
-    { category: 'objects', kind: 'bottle',type: 'bottle',        label: 'Бутылка',        w: 10,  h: 10, r: 5, rotatable: false },
+    // 1. ПОЛ (кисти текстур 32x32)
+    { category: 'terrain', kind: 'tile', type: 'tile_dirt',       tileType: 'dirt',       label: 'Пыль',         w: 32, h: 32, rotatable: false },
+    { category: 'terrain', kind: 'tile', type: 'tile_road',       tileType: 'road',       label: 'Дорога',       w: 32, h: 32, rotatable: false },
+    { category: 'terrain', kind: 'tile', type: 'tile_grass',      tileType: 'grass',      label: 'Степь',        w: 32, h: 32, rotatable: false },
+    { category: 'terrain', kind: 'tile', type: 'tile_wood_floor', tileType: 'wood_floor', label: 'Дерев. пол',   w: 32, h: 32, rotatable: false },
+    { category: 'terrain', kind: 'tile', type: 'tile_boardwalk',  tileType: 'boardwalk',  label: 'Настил',       w: 32, h: 32, rotatable: false },
+    { category: 'terrain', kind: 'tile', type: 'tile_stone',      tileType: 'stone',      label: 'Булыжник',     w: 32, h: 32, rotatable: false },
+    { category: 'terrain', kind: 'tile', type: 'tile_canyon',     tileType: 'canyon',     label: 'Каньон',       w: 32, h: 32, rotatable: false },
+    { category: 'terrain', kind: 'tile', type: 'tile_water',      tileType: 'water',      label: 'Вода',         w: 32, h: 32, rotatable: false },
+    { category: 'terrain', kind: 'tile', type: 'tile_erase',      tileType: 'erase_tile', label: 'Ластик пола',  w: 32, h: 32, rotatable: false },
 
-    // NPC и животные
+    // 2. ПОСТРОЙКИ (модульные здания и конструкции, свободно редактируемые)
+    { category: 'buildings', kind: 'solid', type: 'bld_small_barn', solidType: 'building', label: 'Дом / Сарай',    w: 160, h: 112, mat: 'wood', high: true,  rotatable: false, wallPalKey: 'barnRed',   roofPalKey: 'shingle',   roofStyle: 'shingle', signText: 'HOUSE',      buildingType: 'store',   chimney: true },
+    { category: 'buildings', kind: 'solid', type: 'bld_store',      solidType: 'building', label: 'Магазин',        w: 240, h: 160, mat: 'wood', high: true,  rotatable: false, wallPalKey: 'barnRed',   roofPalKey: 'shingle',   roofStyle: 'shingle', signText: 'GENERAL STORE', buildingType: 'store', chimney: true },
+    { category: 'buildings', kind: 'solid', type: 'bld_bank',       solidType: 'building', label: 'Телеграф/Банк',  w: 224, h: 160, mat: 'wood', high: true,  rotatable: false, wallPalKey: 'slateTeal', roofPalKey: 'slateTeal', roofStyle: 'planks',  signText: 'BANK',       buildingType: 'bank',    chimney: false },
+    { category: 'buildings', kind: 'solid', type: 'bld_sheriff',    solidType: 'building', label: 'Офис шерифа',    w: 240, h: 152, mat: 'wood', high: true,  rotatable: false, wallPalKey: 'woodPale',  roofPalKey: 'shingle',   roofStyle: 'patchy',  signText: 'SHERIFF',    buildingType: 'sheriff', chimney: true },
+    { category: 'buildings', kind: 'solid', type: 'bld_smithy',     solidType: 'building', label: 'Кузница',        w: 240, h: 152, mat: 'wood', high: true,  rotatable: false, wallPalKey: 'woodPale',  roofPalKey: 'shingle',   roofStyle: 'shingle', signText: 'BLACKSMITH', buildingType: 'smithy',  chimney: false },
+    { category: 'buildings', kind: 'solid', type: 'water_tower',    label: 'Вод. башня',     w: 58,  h: 66,  mat: 'wood', high: true,  rotatable: false },
+    { category: 'buildings', kind: 'solid', type: 'wall',           label: 'Стена дер.',     w: 96,  h: 16,  mat: 'wood', high: true,  rotatable: true },
+    { category: 'buildings', kind: 'solid', type: 'window_wall',    label: 'Стена с окном',  w: 64,  h: 16,  mat: 'wood', high: true,  rotatable: true },
+    { category: 'buildings', kind: 'solid', type: 'bar_counter',    label: 'Барная стойка',  w: 128, h: 24,  mat: 'wood', high: false, rotatable: true },
+    { category: 'buildings', kind: 'door_pair', type: 'saloon_door', label: 'Дверь салуна',  w: 16,  h: 76,  mat: 'wood', high: false, rotatable: true },
+
+    // 3. ПРЕДМЕТЫ (укрытия, вестерн-декор и интерактивные точки)
+    { category: 'objects', kind: 'solid', type: 'crate',          label: 'Ящик',           w: 34,  h: 32, mat: 'wood',    high: false, rotatable: false },
+    { category: 'objects', kind: 'solid', type: 'water_barrel',   label: 'Бочка',          w: 26,  h: 26, mat: 'water',   high: false, rotatable: false },
+    { category: 'objects', kind: 'solid', type: 'iron_barrel',    label: 'Жел. бочка',     w: 26,  h: 26, mat: 'metal',   high: false, rotatable: false },
+    { category: 'objects', kind: 'solid', type: 'iron_stove',     label: 'Буржуйка',       w: 24,  h: 24, mat: 'metal',   high: true,  rotatable: false },
+    { category: 'objects', kind: 'solid', type: 'mine_cart',      label: 'Мет. тележка',   w: 44,  h: 26, mat: 'metal',   high: true,  rotatable: true },
+    { category: 'objects', kind: 'solid', type: 'hay',            label: 'Тюк сена',       w: 34,  h: 26, mat: 'hay',     high: false, rotatable: false },
+    { category: 'objects', kind: 'solid', type: 'trough',         label: 'Корыто',         w: 56,  h: 22, mat: 'water',   high: false, rotatable: true },
+    { category: 'objects', kind: 'solid', type: 'fence',          label: 'Забор',          w: 96,  h: 12, mat: 'wood',    high: false, rotatable: true },
+    { category: 'objects', kind: 'solid', type: 'low_wall',       label: 'Кам. стена',     w: 80,  h: 14, mat: 'rock',    high: false, rotatable: true },
+    { category: 'objects', kind: 'solid', type: 'boulder',        label: 'Валун',          w: 46,  h: 42, mat: 'rock',    high: false, rotatable: false },
+    { category: 'objects', kind: 'solid', type: 'wagon',          label: 'Повозка',        w: 62,  h: 28, mat: 'wood',    high: true,  rotatable: true },
+    { category: 'objects', kind: 'solid', type: 'table',          label: 'Стол',           w: 46,  h: 46, mat: 'wood',    high: false, rotatable: false },
+    { category: 'objects', kind: 'solid', type: 'pillar',         label: 'Столб',          w: 18,  h: 18, mat: 'wood',    high: true,  rotatable: false },
+    { category: 'objects', kind: 'solid', type: 'anvil',          label: 'Наковальня',     w: 20,  h: 16, mat: 'metal',   high: false, rotatable: false },
+    { category: 'objects', kind: 'solid', type: 'hitching_post',  label: 'Коновязь',       w: 46,  h: 10, mat: 'wood',    high: false, rotatable: false, isHitchingPost: true },
+    { category: 'objects', kind: 'solid', type: 'cliff',          label: 'Скала',          w: 120, h: 88, mat: 'rock',    high: true,  rotatable: true,  interior: true },
+    { category: 'objects', kind: 'tree',  type: 'tree',           label: 'Дерево',         w: 44,  h: 44, r: 22,           rotatable: false },
+    { category: 'objects', kind: 'pole',  type: 'pole',           label: 'Тел. столб',     w: 16,  h: 16,                  rotatable: false },
+    { category: 'objects', kind: 'bottle',type: 'bottle',         label: 'Бутылка',        w: 10,  h: 10, r: 5,            rotatable: false },
+    { category: 'objects', kind: 'oil_lamp', type: 'oil_lamp',    label: 'Масляная лампа', w: 12,  h: 12, r: 6,            rotatable: false },
+    { category: 'objects', kind: 'solid', type: 'chair',          label: 'Стул салуна',    w: 16,  h: 16, mat: 'wood',    high: false, rotatable: true, isCover: false, passThroughBullets: true },
+    { category: 'objects', kind: 'solid', type: 'piano',          label: 'Пианино',        w: 48,  h: 24, mat: 'wood',    high: false, rotatable: true },
+    { category: 'objects', kind: 'solid', type: 'cactus',         label: 'Кактус Сагуаро', w: 20,  h: 20, mat: 'foliage', high: true,  rotatable: false },
+    { category: 'objects', kind: 'solid', type: 'campfire',       label: 'Костёр',         w: 24,  h: 24, mat: 'stone',   high: false, rotatable: false, isCover: false, passThroughBullets: true, walkThrough: true },
+    { category: 'objects', kind: 'solid', type: 'skull',          label: 'Череп быка',     w: 16,  h: 14, mat: 'stone',   high: false, rotatable: false, isCover: false, passThroughBullets: true, walkThrough: true },
+    { category: 'objects', kind: 'interactable', type: 'dartboard',    label: 'Дартс',       w: 16,  h: 16, r: 44, intKind: 'dartboard',    intLabel: 'СЫГРАТЬ В ДАРТС',   rotatable: false },
+    { category: 'objects', kind: 'interactable', type: 'notice_board', label: 'Объявления',  w: 28,  h: 16, r: 48, intKind: 'notice_board', intLabel: 'ДОСКА ОБЪЯВЛЕНИЙ',  rotatable: false },
+    { category: 'objects', kind: 'interactable', type: 'hatrack',      label: 'Вешалка шляп',w: 28,  h: 28, r: 44, intKind: 'hatrack',      intLabel: 'СМЕНИТЬ ШЛЯПУ',     rotatable: false },
+    { category: 'objects', kind: 'interactable', type: 'medkit',       label: 'Аптечка',     w: 14,  h: 10, r: 44, intKind: 'medkit',       intLabel: 'ВЗЯТЬ БИНТЫ',       rotatable: false },
+    { category: 'objects', kind: 'interactable', type: 'bourbon',      label: 'Бурбон',      w: 10,  h: 10, r: 46, intKind: 'bourbon',      intLabel: 'ВЫПИТЬ БУРБОН',     rotatable: false },
+
+    // 4. NPC и ЗОНЫ
     { category: 'npc', kind: 'bandit', type: 'bandit_walker',    label: 'Бандит (Walker)',    w: 22, h: 22, weaponId: 'walker',     gunType: 'revolver', hp: 80,  rotatable: false },
     { category: 'npc', kind: 'bandit', type: 'bandit_lightning', label: 'Бандит (Lightning)', w: 22, h: 22, weaponId: 'lightning',  gunType: 'revolver', hp: 80,  rotatable: false },
     { category: 'npc', kind: 'bandit', type: 'bandit_rifle',     label: 'Бандит (Винтовка)',  w: 22, h: 22, weaponId: 'winchester', gunType: 'rifle',    hp: 84,  rotatable: false },
     { category: 'npc', kind: 'bandit', type: 'bandit_boss',      label: 'Главарь',            w: 24, h: 24, weaponId: 'winchester', gunType: 'rifle',    hp: 115, tough: true, name: 'ГЛАВАРЬ', rotatable: false },
-    { category: 'npc', kind: 'horse',  type: 'horse',            label: 'Лошадь',             w: 28, h: 20, rotatable: false },
-    { category: 'npc', kind: 'sheep',  type: 'sheep',            label: 'Овца',               w: 16, h: 14, rotatable: false }
+    { category: 'npc', kind: 'civilian', type: 'civ_cowboy',     label: 'Ковбой (мирн.)',     w: 20, h: 20, subType: 'cowboy',       name: 'ПОСЕТИТЕЛЬ',         rotatable: false },
+    { category: 'npc', kind: 'civilian', type: 'civ_lady',       label: 'Дама салуна',        w: 20, h: 20, subType: 'lady',         name: 'ДАМА САЛУНА',        rotatable: false },
+    { category: 'npc', kind: 'civilian', type: 'civ_hunter',     label: 'Охотник',            w: 20, h: 20, subType: 'hunter',       name: 'ОХОТНИК',            rotatable: false },
+    { category: 'npc', kind: 'civilian', type: 'civ_quest',      label: 'Квестовый NPC',      w: 22, h: 22, subType: 'quest',        name: 'НЕЗНАКОМЕЦ',         rotatable: false },
+    { category: 'npc', kind: 'horse',  type: 'horse',            label: 'Лошадь',             w: 32, h: 22, rotatable: false },
+    { category: 'npc', kind: 'sheep',  type: 'sheep',            label: 'Овца',               w: 20, h: 16, rotatable: false },
+    { category: 'npc', kind: 'crow',   type: 'crow',             label: 'Ворона',             w: 14, h: 14, rotatable: false },
+    { category: 'npc', kind: 'snake',  type: 'snake',            label: 'Змея',               w: 18, h: 14, rotatable: false },
+    { category: 'npc', kind: 'spawn',  type: 'marker_spawn',     label: 'Старт игрока',       w: 24, h: 24, rotatable: false },
+    { category: 'npc', kind: 'zone',   type: 'exit_zone',        label: 'Зона выезда',        w: 80, h: 80, zoneKind: 'exit',  rotatable: true },
+    { category: 'npc', kind: 'zone',   type: 'event_zone',       label: 'Зона события',       w: 80, h: 80, zoneKind: 'event', rotatable: true }
   ];
 
   // Единый объект разметки карты (без хардкода в модулях)
@@ -620,43 +853,25 @@
       { x: STREET_START_X, y: STREET_BOT, w: bwLen + 2, h: 22, north: false }
     ];
     boardwalks.forEach((b) => {
-      ctx.fillStyle = 'rgba(22, 15, 10, 0.38)';
-      ctx.fillRect(b.x + 2, b.north ? b.y + b.h : b.y - 3, b.w, 4);
+      ctx.fillStyle = 'rgba(22, 15, 10, 0.28)';
+      ctx.fillRect(b.x + 2, b.north ? b.y + b.h : b.y - 2, b.w, 3);
 
-      ctx.fillStyle = P.woodPale[4];
+      ctx.fillStyle = P.woodPale[3];
       ctx.fillRect(b.x, b.y, b.w, b.h);
 
-      for (let x = b.x; x < b.x + b.w; x += 4) {
-        const wIdx = rng() < 0.25 ? 1 : rng() < 0.72 ? 2 : 3;
+      // Широкие спокойные доски настила с мягкой кромкой (без выступающих «заборных» столбиков)
+      for (let x = b.x; x < b.x + b.w; x += 8) {
+        const wIdx = rng() < 0.28 ? 1 : 2;
         ctx.fillStyle = P.woodPale[wIdx];
-        ctx.fillRect(x, b.y + 1, 3, b.h - 2);
-        ctx.fillStyle = P.woodPale[Math.max(0, wIdx - 1)];
-        ctx.fillRect(x, b.y + 1, 3, 2);
-        ctx.fillStyle = P.woodPale[4];
-        ctx.fillRect(x + 3, b.y, 1, b.h);
-        if (rng() < 0.45) {
-          ctx.fillStyle = '#241d17';
-          ctx.fillRect(x + 1, b.y + 3, 1, 1);
-          ctx.fillRect(x + 1, b.y + b.h - 4, 1, 1);
-        }
-        if (rng() < 0.3) {
-          ctx.fillStyle = P.woodPale[3];
-          ctx.fillRect(x + 1, b.y + 6 + Math.floor(rng() * 8), 1, 4);
-        }
+        ctx.fillRect(x, b.y + 1, 7, b.h - 2);
+        ctx.fillStyle = P.woodPale[0];
+        ctx.fillRect(x, b.y + 1, 7, 1);
+        ctx.fillStyle = P.woodPale[3];
+        ctx.fillRect(x + 7, b.y + 1, 1, b.h - 2);
       }
 
-      ctx.fillStyle = 'rgba(18, 13, 10, 0.32)';
-      ctx.fillRect(b.x, b.north ? b.y : b.y + b.h - 9, b.w, 9);
-
-      for (let px = b.x + 18; px < b.x + b.w - 10; px += 48) {
-        const py = b.north ? b.y + b.h - 5 : b.y + 2;
-        ctx.fillStyle = 'rgba(18, 12, 8, 0.45)';
-        ctx.fillRect(px + 2, py + 2, 4, 5);
-        ctx.fillStyle = P.woodPale[4];
-        ctx.fillRect(px, py, 4, 4);
-        ctx.fillStyle = P.woodPale[1];
-        ctx.fillRect(px, py, 2, 2);
-      }
+      ctx.fillStyle = 'rgba(18, 13, 10, 0.22)';
+      ctx.fillRect(b.x, b.north ? b.y : b.y + b.h - 6, b.w, 6);
     });
 
     // 2.1. Деревянный мост через ручей в каньоне
@@ -680,9 +895,7 @@
     ctx.fillRect(brX - 1, brY - 5, brW + 2, 1);
     ctx.fillRect(brX - 1, brY + brH + 4, brW + 2, 1);
 
-    // 3. Неровные деревенские заборы на выходе с площади к каньону
-    drawSplitFence(ctx, STREET_END_X, STREET_TOP + 10, STREET_END_X + 76, rng, P);
-    drawSplitFence(ctx, STREET_END_X + 2, STREET_BOT + 12, STREET_END_X + 80, rng, P);
+    // 3. Декоративные заборы в проходимых зонах убраны (все видимые заборы имеют точные solid-прямоугольники)
 
     // 4. Каменные россыпи и осыпи
     for (let i = 0; i < 420; i++) {
@@ -724,9 +937,7 @@
       }
     }
 
-    // Декоративные жерди-заборчики в южном дворе и на южной кромке каньона
-    drawSplitFence(ctx, 510, 816, 700, rng, P);
-    drawSplitFence(ctx, 1410 + cdx, 838, 1550 + cdx, rng, P);
+    // Без фантомных декоративных заборов в проходимых местах: все заборы задаются через solids
 
     // Колесо от повозки у крыльца салуна
     drawWagonWheelProp(ctx, SALOON.x + SALOON.w + 10, LAYOUT.doorY1 - 42, P);
@@ -925,19 +1136,206 @@
     return canvas;
   }
 
+  function getTerrainPaletteForTile(type, P) {
+    if (type === 'canyon') return P.canyon;
+    if (type === 'grass') return [P.foliage[3], P.foliage[2], P.foliage[1], P.grass[2], P.grass[1]];
+    if (type === 'stone') return P.stone;
+    if (type === 'wood' || type === 'wood_floor') return P.woodWarm;
+    if (type === 'boardwalk') return P.woodPale;
+    if (type === 'water') return P.water;
+    return P.dirt;
+  }
+
+  // Единый детерминированный попиксельный рисовальщик текстуры земли/пола (строго G.PAL + Байер 4x4, без arc)
+  function paintTerrainPatchToCtx(ctx, px, py, pw, ph, type, P) {
+    const img = ctx.createImageData(pw, ph);
+    const data = img.data;
+    const palArr = getTerrainPaletteForTile(type, P);
+    const rgbArr = palArr.map(hexToRgb);
+
+    if (type === 'wood' || type === 'wood_floor' || type === 'boardwalk') {
+      const stepH = type === 'boardwalk' ? 6 : 8;
+      const jointMod = type === 'boardwalk' ? 48 : 80;
+      for (let ly = 0; ly < ph; ly++) {
+        const wy = py + ly;
+        const plankRow = wy % stepH;
+        const rowGroup = Math.floor(wy / stepH);
+        for (let lx = 0; lx < pw; lx++) {
+          const wx = px + lx;
+          const idx4 = (ly * pw + lx) * 4;
+          const b = bayerAt(wx, wy);
+          const n = smoothNoise(wx + 511, wy + 869, 20);
+          let tone = (type === 'boardwalk' ? 0.28 : 0.36) + (n - 0.5) * 0.28;
+          if (plankRow === stepH - 1) tone = 0.94;
+          else if (plankRow === 0) tone -= 0.14;
+          if (((wx + rowGroup * 43) % jointMod) === 0) tone = 0.90;
+          const sc = G.MATH.clamp(tone, 0, 0.999) * (rgbArr.length - 1);
+          const ci = Math.floor(sc);
+          const rgb = rgbArr[(sc - ci) > b ? Math.min(rgbArr.length - 1, ci + 1) : ci];
+          data[idx4] = rgb[0];
+          data[idx4 + 1] = rgb[1];
+          data[idx4 + 2] = rgb[2];
+          data[idx4 + 3] = 255;
+        }
+      }
+      ctx.putImageData(img, px, py);
+      if (type === 'wood_floor' || type === 'boardwalk') {
+        ctx.fillStyle = P.outline;
+        for (let wy = py; wy < py + ph; wy += stepH) {
+          const rg = Math.floor(wy / stepH);
+          const jx = (rg * 43) % jointMod;
+          for (let wx = px + ((jx - (px % jointMod) + jointMod) % jointMod); wx < px + pw; wx += jointMod) {
+            if (wx >= px && wx < px + pw - 2 && wy + 2 < py + ph) {
+              ctx.fillRect(wx + 2, wy + 2, 1, 1);
+            }
+          }
+        }
+      }
+      return;
+    }
+
+    if (type === 'stone') {
+      for (let ly = 0; ly < ph; ly++) {
+        const wy = py + ly;
+        const row = Math.floor(wy / 8);
+        const rowOff = (row & 1) * 5;
+        const inRow = wy % 8;
+        for (let lx = 0; lx < pw; lx++) {
+          const wx = px + lx;
+          const sx = wx + rowOff;
+          const col = Math.floor(sx / 10);
+          const inCol = sx % 10;
+          const idx4 = (ly * pw + lx) * 4;
+          const b = bayerAt(wx, wy);
+          const blockH = hash2(col + 17, row + 31);
+          let tone = 0.25 + blockH * 0.45 + (smoothNoise(wx, wy, 7) - 0.5) * 0.16;
+          if (inRow === 7 || inCol === 9) tone = 0.95;
+          else if (inRow === 0 || inCol === 0) tone = Math.max(0.04, tone - 0.22);
+          const sc = G.MATH.clamp(tone, 0, 0.999) * (rgbArr.length - 1);
+          const ci = Math.floor(sc);
+          const rgb = rgbArr[(sc - ci) > b ? Math.min(rgbArr.length - 1, ci + 1) : ci];
+          data[idx4] = rgb[0];
+          data[idx4 + 1] = rgb[1];
+          data[idx4 + 2] = rgb[2];
+          data[idx4 + 3] = 255;
+        }
+      }
+      ctx.putImageData(img, px, py);
+      return;
+    }
+
+    if (type === 'water') {
+      for (let ly = 0; ly < ph; ly++) {
+        const wy = py + ly;
+        for (let lx = 0; lx < pw; lx++) {
+          const wx = px + lx;
+          const idx4 = (ly * pw + lx) * 4;
+          const b = bayerAt(wx, wy);
+          const wave = smoothNoise(wx * 0.8 + wy * 0.2, wy + 77, 14);
+          const ripple = Math.sin(wx * 0.28 + wy * 0.16) * 0.12;
+          const tone = G.MATH.clamp(0.28 + (wave - 0.5) * 0.44 + ripple, 0, 0.999);
+          const sc = tone * (rgbArr.length - 1);
+          const ci = Math.floor(sc);
+          const rgb = rgbArr[(sc - ci) > b ? Math.min(rgbArr.length - 1, ci + 1) : ci];
+          data[idx4] = rgb[0];
+          data[idx4 + 1] = rgb[1];
+          data[idx4 + 2] = rgb[2];
+          data[idx4 + 3] = 255;
+        }
+      }
+      ctx.putImageData(img, px, py);
+      ctx.fillStyle = P.cloud[0];
+      for (let d = 0; d < 2; d++) {
+        const rx = px + 4 + Math.floor(hash2(px + d * 11, py + 5) * Math.max(2, pw - 10));
+        const ry = py + 6 + Math.floor(hash2(px + 9, py + d * 17) * Math.max(2, ph - 12));
+        ctx.fillRect(rx, ry, 3, 1);
+      }
+      return;
+    }
+
+    const isRoad = type === 'road';
+    for (let ly = 0; ly < ph; ly++) {
+      const wy = py + ly;
+      const trackMod = wy % 32;
+      const rut = isRoad && ((trackMod >= 8 && trackMod <= 11) || (trackMod >= 21 && trackMod <= 24));
+      for (let lx = 0; lx < pw; lx++) {
+        const wx = px + lx;
+        const idx4 = (ly * pw + lx) * 4;
+        const b = bayerAt(wx, wy);
+        const nBig = smoothNoise(wx + 19, wy + 31, 72);
+        const nMed = smoothNoise(wx + 43, wy + 73, 22);
+        const nFine = smoothNoise(wx + 113, wy + 191, 5);
+        let tone = (isRoad ? 0.44 : 0.38) + (nBig - 0.5) * 0.40 + (nMed - 0.5) * 0.28 + (nFine - 0.5) * 0.14;
+        if (rut) tone += 0.22;
+        const sc = G.MATH.clamp(tone, 0, 0.999) * (rgbArr.length - 1);
+        const ci = Math.floor(sc);
+        const rgb = rgbArr[(sc - ci) > b ? Math.min(rgbArr.length - 1, ci + 1) : ci];
+        data[idx4] = rgb[0];
+        data[idx4 + 1] = rgb[1];
+        data[idx4 + 2] = rgb[2];
+        data[idx4 + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, px, py);
+
+    const rng = makeRng(px * 31 + py * 17 + type.length * 97);
+    if (type === 'grass') {
+      const tufts = Math.max(3, Math.round((pw * ph) / 140));
+      for (let i = 0; i < tufts; i++) {
+        const gx = px + 3 + rng() * Math.max(2, pw - 6);
+        const gy = py + 3 + rng() * Math.max(2, ph - 6);
+        drawTallGrassTuft(ctx, gx, gy, rng, P);
+      }
+    } else if (type === 'dirt' || type === 'road' || type === 'canyon') {
+      const pebbles = Math.max(1, Math.round((pw * ph) / 512));
+      for (let i = 0; i < pebbles; i++) {
+        if (rng() < 0.72) {
+          drawPebbleCluster(ctx, px + 3 + rng() * Math.max(2, pw - 6), py + 3 + rng() * Math.max(2, ph - 6), rng, P, type === 'canyon' && rng() < 0.35);
+        }
+      }
+    }
+  }
+
+  function bakeBlankBackground(width, height, baseTerrain) {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    const P = getPal();
+    paintTerrainPatchToCtx(ctx, 0, 0, width, height, baseTerrain, P);
+
+    if (baseTerrain !== 'wood') {
+      const rng = makeRng(width * 13 + height * 7 + baseTerrain.length * 91);
+      const pebbleCount = Math.round((width * height) / 18500);
+      for (let i = 0; i < pebbleCount; i++) {
+        drawPebbleCluster(ctx, 28 + rng() * (width - 56), 28 + rng() * (height - 56), rng, P, baseTerrain === 'canyon' && rng() < 0.35);
+      }
+      const grassCount = baseTerrain === 'grass' ? Math.round((width * height) / 5200) : Math.round((width * height) / 11000);
+      for (let i = 0; i < grassCount; i++) {
+        const gx = 24 + rng() * (width - 48);
+        const gy = 24 + rng() * (height - 48);
+        if (rng() < 0.18) drawSageBush(ctx, gx, gy, rng, P);
+        else drawTallGrassTuft(ctx, gx, gy, rng, P);
+      }
+    }
+    return canvas;
+  }
+
   // ==================== ЗАПЕЧЁННЫЕ 2.5D-СПРАЙТЫ ЗДАНИЙ, СКАЛ И ОБЪЕКТОВ ====================
 
   // 2.5D-здание в духе референсов: крыша из черепицы/дранки + видимый деревянный фасад с окнами и козырьком
   function bakeBuildingSprite(s, P) {
-    const isNorth = s.y < LAYOUT.streetTop + 16;
+    const isNorth = s.showFacade !== undefined ? !!s.showFacade : (s.locked ? (s.y < LAYOUT.streetTop + 16) : true);
     const padTop = 10;
-    const padBot = isNorth ? 8 : 4;
+    const padBot = 0;
     const cw = s.w + 4;
     const ch = s.h + padTop + padBot;
     const c = document.createElement('canvas');
     c.width = cw;
     c.height = ch;
     const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
     const rng = makeRng(s.x * 31 + s.y * 17 + 99);
 
     const wallPal = P[s.wallPalKey || 'woodPale'] || P.woodPale;
@@ -1010,8 +1408,8 @@
         }
       }
 
-      // Навес крыльца/веранды, выступающий вниз со столбами
-      const porchY = oy + s.h - 2;
+      // Навес крыльца/веранды и столбы строго внутри габарита коллизии s.h
+      const porchY = oy + s.h - 7;
       ctx.fillStyle = '#140f0c';
       ctx.fillRect(ox + 2, porchY, s.w - 4, 7);
       for (let x = ox + 3; x < ox + s.w - 3; x += 3) {
@@ -1023,17 +1421,15 @@
 
       for (let postX = ox + 14; postX < ox + s.w - 12; postX += 38) {
         ctx.fillStyle = '#140f0c';
-        ctx.fillRect(postX - 1, porchY + 4, 3, 4);
+        ctx.fillRect(postX - 1, porchY + 3, 3, 4);
         ctx.fillStyle = P.woodPale[2];
-        ctx.fillRect(postX, porchY + 4, 2, 3);
+        ctx.fillRect(postX, porchY + 3, 2, 3);
         ctx.fillStyle = P.woodPale[0];
-        ctx.fillRect(postX, porchY + 4, 1, 3);
+        ctx.fillRect(postX, porchY + 3, 1, 3);
       }
     } else {
-      // Южные дома: виден ТОЛЬКО козырёк-навес с северной стороны крыши над тротуаром (без фасада!)
-      const porchY = oy - 5;
-      ctx.fillStyle = 'rgba(20, 14, 10, 0.34)';
-      ctx.fillRect(ox + 4, porchY + 3, s.w - 4, 5);
+      // Южные дома: козырёк-навес строго внутри верхнего края коллизии s.y
+      const porchY = oy;
       ctx.fillStyle = '#140f0c';
       ctx.fillRect(ox + 2, porchY, s.w - 4, 6);
       for (let x = ox + 3; x < ox + s.w - 3; x += 3) {
@@ -1137,21 +1533,21 @@
       ctx.fillRect(rx, ry - 1, rw, 3);
       ctx.fillStyle = wallPal[1];
       ctx.fillRect(rx + 1, ry, rw - 2, 1);
-      if (s.buildingType === 'smithy') {
-        // Чугунная вытяжная труба горна на крыше кузницы
-        const fx = rx + Math.floor(rw * 0.25);
-        const fy = ridgeY - 8;
-        ctx.fillStyle = 'rgba(18, 12, 9, 0.42)';
-        ctx.fillRect(fx + 2, fy + 2, 9, 9);
-        ctx.fillStyle = '#140f0c';
-        ctx.fillRect(fx, fy, 8, 8);
-        ctx.fillStyle = P.steelDark[2];
-        ctx.fillRect(fx + 1, fy + 1, 6, 6);
-        ctx.fillStyle = P.steelDark[0];
-        ctx.fillRect(fx + 1, fy + 1, 3, 2);
-        ctx.fillStyle = '#090706';
-        ctx.fillRect(fx + 3, fy + 3, 2, 2);
-      }
+    }
+    if (s.buildingType === 'smithy') {
+      // Чугунная вытяжная труба горна на крыше кузницы
+      const fx = rx + Math.floor(rw * 0.25);
+      const fy = ridgeY - 8;
+      ctx.fillStyle = 'rgba(18, 12, 9, 0.42)';
+      ctx.fillRect(fx + 2, fy + 2, 9, 9);
+      ctx.fillStyle = '#140f0c';
+      ctx.fillRect(fx, fy, 8, 8);
+      ctx.fillStyle = P.steelDark[2];
+      ctx.fillRect(fx + 1, fy + 1, 6, 6);
+      ctx.fillStyle = P.steelDark[0];
+      ctx.fillRect(fx + 1, fy + 1, 3, 2);
+      ctx.fillStyle = '#090706';
+      ctx.fillRect(fx + 3, fy + 3, 2, 2);
     }
 
     // Конёк крыши с объёмным бликом и тенью
@@ -1910,6 +2306,418 @@
     return { canvas: c, ox: 0, oy: 0 };
   }
 
+  function bakeIronBarrelSprite(s, P) {
+    const w = s.w, h = s.h;
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    const cx = Math.floor(w * 0.5);
+    const cy = Math.floor(h * 0.5);
+    const r = Math.floor(Math.min(w, h) * 0.5) - 1;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const dx = x - cx, dy = y - cy;
+        const d = Math.hypot(dx, dy);
+        if (d > r + 0.5) continue;
+        if (d >= r - 0.8) {
+          ctx.fillStyle = P.outline;
+        } else if (d >= r - 2.3) {
+          ctx.fillStyle = (dx + dy < 0) ? P.steelLight[1] : P.steelDark[3];
+        } else {
+          ctx.fillStyle = (dx < -1 && dy < -1) ? P.steelDark[0] : ((dx + dy > 3) ? P.steelDark[4] : P.steelDark[2]);
+        }
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+    // Пробка и заклёпки на крышке
+    ctx.fillStyle = P.steelLight[0];
+    ctx.fillRect(cx - 4, cy - 3, 3, 2);
+    ctx.fillStyle = P.brass[1];
+    ctx.fillRect(cx + 2, cy + 1, 2, 2);
+    return { canvas: c, ox: 0, oy: 0 };
+  }
+
+  function bakeIronStoveSprite(s, P) {
+    const w = s.w, h = s.h;
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = P.outline;
+    ctx.fillRect(1, 1, w - 2, h - 2);
+    ctx.fillStyle = P.steelDark[3];
+    ctx.fillRect(2, 2, w - 4, h - 4);
+    ctx.fillStyle = P.steelDark[1];
+    ctx.fillRect(3, 3, w - 7, h - 7);
+    ctx.fillStyle = P.steelLight[2];
+    ctx.fillRect(3, 3, w - 8, 2);
+    // Круглая конфорка и труба сверху
+    const cx = Math.floor(w * 0.5), cy = Math.floor(h * 0.5);
+    ctx.fillStyle = P.outline;
+    ctx.fillRect(cx - 5, cy - 5, 10, 10);
+    ctx.fillStyle = P.steelDark[4];
+    ctx.fillRect(cx - 4, cy - 4, 8, 8);
+    ctx.fillStyle = P.barnRed[0];
+    ctx.fillRect(cx - 2, cy - 2, 4, 4);
+    ctx.fillStyle = P.brass[0];
+    ctx.fillRect(cx - 1, cy - 1, 2, 2);
+    ctx.fillStyle = P.steelLight[1];
+    ctx.fillRect(3, Math.floor(h * 0.5) - 1, 2, 3);
+    return { canvas: c, ox: 0, oy: 0 };
+  }
+
+  function bakeMineCartSprite(s, P) {
+    const w = s.w, h = s.h;
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    // Колёса по краям
+    ctx.fillStyle = P.outline;
+    ctx.fillRect(4, 0, 8, h);
+    ctx.fillRect(w - 12, 0, 8, h);
+    // Кузов
+    ctx.fillRect(1, 2, w - 2, h - 4);
+    ctx.fillStyle = P.steelDark[2];
+    ctx.fillRect(2, 3, w - 4, h - 6);
+    ctx.fillStyle = P.steelDark[4];
+    ctx.fillRect(4, 5, w - 8, h - 10);
+    // Металлическая кромка и руда/заклёпки
+    ctx.fillStyle = P.steelLight[1];
+    ctx.fillRect(2, 3, w - 4, 2);
+    ctx.fillStyle = P.steelLight[0];
+    ctx.fillRect(3, 3, w - 8, 1);
+    ctx.fillStyle = P.canyon[2];
+    ctx.fillRect(7, 7, 6, 4);
+    ctx.fillRect(w - 15, 8, 7, 5);
+    ctx.fillStyle = P.brass[1];
+    ctx.fillRect(Math.floor(w * 0.5) - 2, 7, 4, 3);
+    return { canvas: c, ox: 0, oy: 0 };
+  }
+
+  function bakeWindowWallSprite(s, P) {
+    const w = Math.round(s.w);
+    const h = Math.round(s.h);
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    const colOut = P.outline || '#140f0c';
+
+    ctx.fillStyle = colOut;
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = P.woodWarm[3];
+    ctx.fillRect(1, 1, w - 2, h - 2);
+    ctx.fillStyle = P.woodWarm[1];
+    ctx.fillRect(2, 2, w - 4, h - 4);
+    ctx.fillStyle = P.woodWarm[0];
+    ctx.fillRect(2, 2, w - 4, Math.min(2, h - 4));
+
+    if (w >= h) {
+      const gx = Math.floor(w * 0.22);
+      const gw = Math.max(14, Math.floor(w * 0.56));
+      const gy = 3;
+      const gh = Math.max(4, h - 6);
+      ctx.fillStyle = colOut;
+      ctx.fillRect(gx - 1, gy - 1, gw + 2, gh + 2);
+      ctx.fillStyle = P.woodPale[1];
+      ctx.fillRect(gx, gy, gw, gh);
+      ctx.fillStyle = P.glass[3];
+      ctx.fillRect(gx + 2, gy + 2, gw - 4, gh - 4);
+      ctx.fillStyle = P.glass[1];
+      for (let i = 0; i < gw - 6; i += 8) {
+        ctx.fillRect(gx + 3 + i, gy + 2, 3, Math.max(1, gh - 5));
+        ctx.fillStyle = P.glass[0];
+        ctx.fillRect(gx + 3 + i, gy + 2, 1, 2);
+        ctx.fillStyle = P.glass[1];
+      }
+      ctx.fillStyle = P.woodPale[0];
+      ctx.fillRect(gx + Math.floor(gw * 0.5), gy + 1, 2, gh - 2);
+    } else {
+      const gy = Math.floor(h * 0.22);
+      const gh = Math.max(14, Math.floor(h * 0.56));
+      const gx = 3;
+      const gw = Math.max(4, w - 6);
+      ctx.fillStyle = colOut;
+      ctx.fillRect(gx - 1, gy - 1, gw + 2, gh + 2);
+      ctx.fillStyle = P.woodPale[1];
+      ctx.fillRect(gx, gy, gw, gh);
+      ctx.fillStyle = P.glass[3];
+      ctx.fillRect(gx + 2, gy + 2, gw - 4, gh - 4);
+      ctx.fillStyle = P.glass[0];
+      for (let i = 0; i < gh - 6; i += 8) {
+        ctx.fillRect(gx + 2, gy + 3 + i, Math.max(1, gw - 5), 2);
+      }
+      ctx.fillStyle = P.woodPale[0];
+      ctx.fillRect(gx + 1, gy + Math.floor(gh * 0.5), gw - 2, 2);
+    }
+    return { canvas: c, ox: 0, oy: 0 };
+  }
+
+  function bakeBarCounterSprite(s, P) {
+    const w = Math.round(s.w);
+    const h = Math.round(s.h);
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    const colOut = P.outline || '#140f0c';
+
+    ctx.fillStyle = colOut;
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = P.woodWarm[3];
+    ctx.fillRect(1, 1, w - 2, h - 2);
+    ctx.fillStyle = P.woodWarm[1];
+    ctx.fillRect(2, 2, w - 4, h - 4);
+    ctx.fillStyle = P.woodWarm[0];
+    if (w >= h) {
+      ctx.fillRect(2, 2, w - 4, 3);
+      ctx.fillStyle = P.woodWarm[4];
+      ctx.fillRect(2, Math.floor(h * 0.45), w - 4, 1);
+      // Латунная подножка-поручень вдоль передней кромки
+      ctx.fillStyle = P.brass[2];
+      ctx.fillRect(3, h - 4, w - 6, 2);
+      ctx.fillStyle = P.brass[0];
+      ctx.fillRect(4, h - 4, w - 8, 1);
+      // Бокал / салфетка и латунные подставки
+      if (w >= 48) {
+        ctx.fillStyle = P.cloud[0];
+        ctx.fillRect(14, 6, 7, 5);
+        ctx.fillStyle = P.brass[0];
+        ctx.fillRect(Math.floor(w * 0.55), 7, 4, 4);
+        ctx.fillRect(Math.floor(w * 0.78), 8, 4, 4);
+      }
+    } else {
+      ctx.fillRect(2, 2, 3, h - 4);
+      ctx.fillStyle = P.woodWarm[4];
+      ctx.fillRect(Math.floor(w * 0.45), 2, 1, h - 4);
+      ctx.fillStyle = P.brass[2];
+      ctx.fillRect(w - 4, 3, 2, h - 6);
+      ctx.fillStyle = P.brass[0];
+      ctx.fillRect(w - 4, 4, 1, h - 8);
+      if (h >= 48) {
+        ctx.fillStyle = P.cloud[0];
+        ctx.fillRect(6, 14, 5, 7);
+        ctx.fillStyle = P.brass[0];
+        ctx.fillRect(7, Math.floor(h * 0.6), 4, 4);
+      }
+    }
+    return { canvas: c, ox: 0, oy: 0 };
+  }
+
+  function bakeChairSprite(s, P) {
+    const w = Math.round(s.w);
+    const h = Math.round(s.h);
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    const colOut = P.outline || '#140f0c';
+    const rot = !!s.rotated;
+
+    // Ножки-контуры и сиденье
+    ctx.fillStyle = colOut;
+    ctx.fillRect(2, 2, w - 4, h - 4);
+    ctx.fillStyle = P.woodWarm[3];
+    ctx.fillRect(3, 3, w - 6, h - 6);
+    ctx.fillStyle = P.woodWarm[1];
+    ctx.fillRect(4, 4, w - 8, h - 8);
+    ctx.fillStyle = P.woodWarm[0];
+    ctx.fillRect(4, 4, w - 9, 2);
+    // Спинка стула (переключается по rotated)
+    ctx.fillStyle = colOut;
+    if (!rot) {
+      ctx.fillRect(2, 1, w - 4, 4);
+      ctx.fillStyle = P.woodWarm[0];
+      ctx.fillRect(3, 2, w - 6, 2);
+    } else {
+      ctx.fillRect(1, 2, 4, h - 4);
+      ctx.fillStyle = P.woodWarm[0];
+      ctx.fillRect(2, 3, 2, h - 6);
+    }
+    return { canvas: c, ox: 0, oy: 0 };
+  }
+
+  function bakePianoSprite(s, P) {
+    const w = Math.round(s.w);
+    const h = Math.round(s.h);
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    const colOut = P.outline || '#140f0c';
+
+    ctx.fillStyle = colOut;
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = P.woodWarm[4];
+    ctx.fillRect(1, 1, w - 2, h - 2);
+    ctx.fillStyle = P.woodWarm[2];
+    ctx.fillRect(2, 2, w - 4, h - 4);
+    ctx.fillStyle = P.woodWarm[0];
+    if (w >= h) {
+      ctx.fillRect(2, 2, w - 4, 3);
+      // Пюпитр и крышка
+      ctx.fillStyle = P.woodWarm[3];
+      ctx.fillRect(6, 6, w - 12, Math.max(4, h - 14));
+      // Клавиатура вдоль южной грани
+      ctx.fillStyle = colOut;
+      ctx.fillRect(4, h - 8, w - 8, 6);
+      ctx.fillStyle = P.cloud[0];
+      ctx.fillRect(5, h - 7, w - 10, 4);
+      ctx.fillStyle = colOut;
+      for (let kx = 6; kx < w - 7; kx += 3) {
+        if ((kx % 7) !== 0) ctx.fillRect(kx, h - 7, 1, 2);
+      }
+      // Латунные подсвечники
+      ctx.fillStyle = P.brass[0];
+      ctx.fillRect(4, 4, 3, 3);
+      ctx.fillRect(w - 7, 4, 3, 3);
+    } else {
+      ctx.fillRect(2, 2, 3, h - 4);
+      ctx.fillStyle = P.woodWarm[3];
+      ctx.fillRect(6, 6, Math.max(4, w - 14), h - 12);
+      ctx.fillStyle = colOut;
+      ctx.fillRect(w - 8, 4, 6, h - 8);
+      ctx.fillStyle = P.cloud[0];
+      ctx.fillRect(w - 7, 5, 4, h - 10);
+      ctx.fillStyle = colOut;
+      for (let ky = 6; ky < h - 7; ky += 3) {
+        if ((ky % 7) !== 0) ctx.fillRect(w - 7, ky, 2, 1);
+      }
+      ctx.fillStyle = P.brass[0];
+      ctx.fillRect(4, 4, 3, 3);
+      ctx.fillRect(4, h - 7, 3, 3);
+    }
+    return { canvas: c, ox: 0, oy: 0 };
+  }
+
+  function bakeCactusSprite(s, P) {
+    const w = Math.round(s.w);
+    const h = Math.round(s.h);
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    const colOut = P.outline || '#140f0c';
+
+    // Попиксельная форма Сагуаро (ствол + левый и правый побеги, строго без arc)
+    const cx = Math.floor(w * 0.5);
+    const cy = Math.floor(h * 0.5);
+    const mask = [];
+    for (let y = 0; y < h; y++) {
+      mask[y] = [];
+      for (let x = 0; x < w; x++) {
+        const dMain = Math.hypot((x - cx) / 4.2, (y - cy) / 4.4);
+        const inLeftArm = x >= 2 && x <= cx - 1 && y >= cy - 2 && y <= cy + 2;
+        const inLeftTip = Math.hypot(x - 4, y - (cy - 3)) <= 2.7;
+        const inRightArm = x >= cx + 1 && x <= w - 3 && y >= cy - 3 && y <= cy + 1;
+        const inRightTip = Math.hypot(x - (w - 5), y - (cy - 4)) <= 2.7;
+        mask[y][x] = (dMain <= 1.0) || inLeftArm || inLeftTip || inRightArm || inRightTip;
+      }
+    }
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (!mask[y][x]) continue;
+        const isEdge = !mask[y - 1] || !mask[y - 1][x] || !mask[y + 1] || !mask[y + 1][x] || !mask[y][x - 1] || !mask[y][x + 1];
+        if (isEdge) {
+          ctx.fillStyle = colOut;
+        } else {
+          const sunLit = (x - cx) * 0.6 + (y - cy) * 0.7;
+          const rib = ((x + y) % 3 === 0);
+          ctx.fillStyle = sunLit < -1.2 ? P.foliage[0] : (sunLit > 2.2 ? P.foliage[3] : (rib ? P.foliage[2] : P.foliage[1]));
+        }
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+    // Колючки (светлые блики на рёбрах)
+    ctx.fillStyle = P.grass[0];
+    ctx.fillRect(cx - 2, cy - 2, 1, 1);
+    ctx.fillRect(4, cy - 3, 1, 1);
+    ctx.fillRect(w - 5, cy - 4, 1, 1);
+    return { canvas: c, ox: 0, oy: 0 };
+  }
+
+  function bakeCampfireBaseSprite(s, P) {
+    const w = Math.round(s.w);
+    const h = Math.round(s.h);
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    const colOut = P.outline || '#140f0c';
+    const cx = Math.floor(w * 0.5);
+    const cy = Math.floor(h * 0.5);
+
+    // Каменное кольцо попиксельно
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + 0.15;
+      const sx = Math.round(cx + Math.cos(a) * 8);
+      const sy = Math.round(cy + Math.sin(a) * 8);
+      ctx.fillStyle = colOut;
+      ctx.fillRect(sx - 2, sy - 2, 5, 5);
+      ctx.fillStyle = (i % 2 === 0) ? P.stone[1] : P.stone[2];
+      ctx.fillRect(sx - 1, sy - 1, 3, 3);
+      ctx.fillStyle = P.stone[0];
+      ctx.fillRect(sx - 1, sy - 1, 2, 1);
+    }
+    // Зола и угли внутри кольца
+    ctx.fillStyle = P.stone[4];
+    ctx.fillRect(cx - 5, cy - 5, 10, 10);
+    // Перекрещённые поленья
+    for (let k = -5; k <= 5; k++) {
+      ctx.fillStyle = colOut;
+      ctx.fillRect(cx + k - 1, cy + Math.floor(k * 0.7) - 1, 3, 3);
+      ctx.fillRect(cx + k - 1, cy - Math.floor(k * 0.7) - 1, 3, 3);
+    }
+    for (let k = -4; k <= 4; k++) {
+      ctx.fillStyle = P.woodWarm[3];
+      ctx.fillRect(cx + k, cy + Math.floor(k * 0.7), 2, 2);
+      ctx.fillStyle = P.woodWarm[1];
+      ctx.fillRect(cx + k, cy - Math.floor(k * 0.7), 2, 2);
+    }
+    // Тлеющие угли в центре
+    ctx.fillStyle = P.barnRed[0];
+    ctx.fillRect(cx - 3, cy - 2, 6, 4);
+    ctx.fillStyle = P.brass[1];
+    ctx.fillRect(cx - 2, cy - 1, 4, 2);
+    return { canvas: c, ox: 0, oy: 0 };
+  }
+
+  function bakeBullSkullSprite(s, P) {
+    const w = Math.round(s.w);
+    const h = Math.round(s.h);
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    const colOut = P.outline || '#140f0c';
+
+    // Рога быка (изогнутые попиксельно)
+    ctx.fillStyle = colOut;
+    ctx.fillRect(0, 1, 5, 5);
+    ctx.fillRect(w - 5, 1, 5, 5);
+    ctx.fillRect(3, 3, w - 6, 6);
+    ctx.fillRect(5, 6, w - 10, 7);
+    ctx.fillStyle = P.woodPale[3];
+    ctx.fillRect(1, 2, 2, 3);
+    ctx.fillRect(w - 3, 2, 2, 3);
+    ctx.fillStyle = P.cloud[1];
+    ctx.fillRect(2, 3, 3, 2);
+    ctx.fillRect(w - 5, 3, 3, 2);
+    // Череп
+    ctx.fillStyle = P.cloud[0];
+    ctx.fillRect(4, 4, w - 8, 5);
+    ctx.fillStyle = P.cloud[2];
+    ctx.fillRect(6, 9, w - 12, 3);
+    // Глазницы и носовой вырез
+    ctx.fillStyle = colOut;
+    ctx.fillRect(5, 5, 2, 2);
+    ctx.fillRect(w - 7, 5, 2, 2);
+    ctx.fillRect(Math.floor(w * 0.5) - 1, 10, 2, 2);
+    return { canvas: c, ox: 0, oy: 0 };
+  }
+
   function bakeSolidSprites(solids, trees) {
     const P = getPal();
     for (let i = 0; i < solids.length; i++) {
@@ -1926,6 +2734,16 @@
       else if (s.type === 'low_wall') s.baked = bakeLowWallSprite(s, P);
       else if (s.type === 'water_tower') s.baked = bakeWaterTowerSprite(s, P);
       else if (s.type === 'anvil') s.baked = bakeAnvilSprite(s, P);
+      else if (s.type === 'iron_barrel') s.baked = bakeIronBarrelSprite(s, P);
+      else if (s.type === 'iron_stove') s.baked = bakeIronStoveSprite(s, P);
+      else if (s.type === 'mine_cart') s.baked = bakeMineCartSprite(s, P);
+      else if (s.type === 'window_wall') s.baked = bakeWindowWallSprite(s, P);
+      else if (s.type === 'bar_counter') s.baked = bakeBarCounterSprite(s, P);
+      else if (s.type === 'chair') s.baked = bakeChairSprite(s, P);
+      else if (s.type === 'piano') s.baked = bakePianoSprite(s, P);
+      else if (s.type === 'cactus') s.baked = bakeCactusSprite(s, P);
+      else if (s.type === 'campfire') s.baked = bakeCampfireBaseSprite(s, P);
+      else if (s.type === 'skull') s.baked = bakeBullSkullSprite(s, P);
       else if ((s.type === 'wall' || s.type === 'pillar') && !String(s.id).startsWith('sal_')) s.baked = bakeWallOrPillarSprite(s, P);
       else if (s.type === 'table' && !String(s.id).startsWith('sal_')) s.baked = bakeTableSprite(s, P);
     }
@@ -2067,6 +2885,7 @@
   function isFreeSpot(x, y, r, solids) {
     for (let i = 0; i < solids.length; i++) {
       const s = solids[i];
+      if (s.walkThrough || s._storyHidden) continue;
       if (x > s.x - r && x < s.x + s.w + r && y > s.y - r && y < s.y + s.h + r) {
         return false;
       }
@@ -2309,6 +3128,7 @@
     let hy = Math.round(hp.y + hp.h + 22);
     if (solids) {
       for (let i = 0; i < solids.length; i++) {
+        if (solids[i].walkThrough || solids[i]._storyHidden) continue;
         const res = G.MATH.circleRectPush(hx, hy, 14, solids[i]);
         if (res.hit) {
           hx = res.x;
@@ -2324,7 +3144,7 @@
       homeY: hy,
       postX: Math.round(hp.x + hp.w * 0.5),
       postY: Math.round(hp.y + hp.h * 0.5),
-      r: 13,
+      r: 15,
       vx: 0,
       vy: 0,
       speed: 0,
@@ -2340,6 +3160,9 @@
       buckTimer: 0,
       stampedeTimer: 0,
       stampedeAngle: 0,
+      swerveTimer: 0,
+      swerveCd: 0,
+      swerveAngle: 0,
       gallopPhase: 0,
       stepTimer: 0,
       grazeTimer: 2.2,
@@ -2359,7 +3182,7 @@
       y: sy,
       homeX: sx,
       homeY: sy,
-      r: 8,
+      r: 10,
       vx: 0,
       vy: 0,
       angle: Math.random() * Math.PI * 2,
@@ -2372,10 +3195,209 @@
       walkPhase: 0,
       hitFlash: 0,
       bleatCd: 0,
+      fireDmgCd: 0,
       fleeAngle: 0,
       targetX: sx,
       targetY: sy
     };
+  }
+
+  let crowIdSeq = 1;
+  function makeCrow(x, y, id) {
+    const cx = Math.round(x);
+    const cy = Math.round(y);
+    return {
+      id: id || ('crow_' + (crowIdSeq++)),
+      x: cx,
+      y: cy,
+      homeX: cx,
+      homeY: cy,
+      z: 0,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      angle: Math.random() * Math.PI * 2,
+      state: 'perched', // 'perched' | 'fly_to_corpse' | 'flying' | 'gone'
+      respawnTimer: 0,
+      hopTimer: G.MATH.rand(1.2, 4.0),
+      wingPhase: Math.random() * Math.PI * 2,
+      flapSpeed: G.MATH.rand(14, 18),
+      corpseId: null,
+      corpseSpotX: cx,
+      corpseSpotY: cy
+    };
+  }
+
+  function createInitialCrows() {
+    const dx = LAYOUT.canyonDx;
+    const spots = [
+      { x: 520, y: STREET_TOP + 8 },
+      { x: 965, y: STREET_TOP + 7 },
+      { x: 304, y: 668 },
+      { x: 874, y: 818 },
+      { x: 1320 + dx, y: 185 },
+      { x: 1835 + dx, y: 310 }
+    ];
+    return spots.map((sp) => makeCrow(sp.x, sp.y));
+  }
+
+  let lizardIdSeq = 1;
+  function makeLizard(x, y, id) {
+    const lx = Math.round(x);
+    const ly = Math.round(y);
+    return {
+      id: id || ('lizard_' + (lizardIdSeq++)),
+      x: lx,
+      y: ly,
+      homeX: lx,
+      homeY: ly,
+      vx: 0,
+      vy: 0,
+      angle: Math.random() * Math.PI * 2,
+      state: 'idle', // 'idle' | 'scurry' | 'flee'
+      stateTimer: G.MATH.rand(1.5, 5.0),
+      tailPhase: Math.random() * Math.PI * 2,
+      colIdx: Math.floor(Math.random() * 2),
+      targetX: lx,
+      targetY: ly
+    };
+  }
+
+  function createInitialLizards(solids) {
+    const dx = LAYOUT.canyonDx;
+    const spots = [
+      { x: 590, y: 245 }, { x: 890, y: 585 }, { x: 1185, y: 575 },
+      { x: 1295 + dx, y: 270 }, { x: 1560 + dx, y: 175 }, { x: 1685 + dx, y: 495 },
+      { x: 1565 + dx, y: 790 }, { x: 1860 + dx, y: 410 }, { x: 2170 + dx, y: 155 },
+      { x: 2560 + dx, y: 580 }
+    ];
+    return spots.map((sp) => {
+      let lx = sp.x, ly = sp.y;
+      if (solids && !isFreeSpot(lx, ly, 6, solids)) {
+        lx += 18;
+        ly += 16;
+      }
+      return makeLizard(lx, ly);
+    });
+  }
+
+  let snakeIdSeq = 1;
+  function makeSnake(x, y, id) {
+    const sx = Math.round(x);
+    const sy = Math.round(y);
+    return {
+      id: id || ('snake_' + (snakeIdSeq++)),
+      x: sx,
+      y: sy,
+      homeX: sx,
+      homeY: sy,
+      r: 8,
+      hp: 15,
+      maxHp: 15,
+      alive: true,
+      angle: Math.random() * Math.PI * 2,
+      state: 'idle', // 'idle' | 'slither' | 'coil'
+      stateTimer: G.MATH.rand(1.5, 4.0),
+      phase: Math.random() * Math.PI * 2,
+      rattleCd: 0,
+      biteCd: 0,
+      hitFlash: 0,
+      targetX: sx,
+      targetY: sy
+    };
+  }
+
+  function createInitialSnakes(solids) {
+    const dx = LAYOUT.canyonDx;
+    const spots = [
+      { x: 640, y: 845 },
+      { x: 1580 + dx, y: 785 },
+      { x: 1840 + dx, y: 650 },
+      { x: 2490 + dx, y: 660 }
+    ];
+    return spots.map((sp) => {
+      let sx = sp.x, sy = sp.y;
+      if (solids && !isFreeSpot(sx, sy, 9, solids)) {
+        sx += 22;
+        sy -= 18;
+      }
+      return makeSnake(sx, sy);
+    });
+  }
+
+  let lampIdSeq = 1;
+  function makeOilLamp(x, y, id) {
+    return {
+      id: id || ('lamp_' + (lampIdSeq++)),
+      x: Math.round(x),
+      y: Math.round(y),
+      r: 6,
+      alive: true,
+      flickerSeed: Math.random() * 10
+    };
+  }
+
+  let civIdSeq = 1;
+  function makeCivilian(subType, x, y, opts) {
+    const o = opts || {};
+    const sub = subType || o.subType || 'cowboy';
+    const defName = sub === 'lady'
+      ? 'ДАМА САЛУНА'
+      : sub === 'hunter'
+        ? 'ОХОТНИК'
+        : sub === 'quest'
+          ? 'НЕЗНАКОМЕЦ'
+          : 'ПОСЕТИТЕЛЬ';
+    const idStr = String(o.id || ('civ_' + (civIdSeq++)));
+    const rawTag = String(o.npcId || o.tagId || '').trim();
+    return {
+      id: idStr,
+      subType: sub,
+      x: Math.round(x),
+      y: Math.round(y),
+      homeX: Math.round(x),
+      homeY: Math.round(y),
+      r: 10,
+      angle: o.angle !== undefined ? o.angle : Math.PI * 0.5,
+      name: o.name || defName,
+      npcId: rawTag,
+      tagId: rawTag,
+      requiresUnlock: String(o.requiresUnlock || '').trim(),
+      dressTone: o.dressTone || ((civIdSeq % 2 === 0) ? 'barnRed' : 'slateTeal'),
+      lookPhase: Math.random() * Math.PI * 2
+    };
+  }
+
+  let zoneIdSeq = 1;
+  function makeZone(zoneKind, x, y, w, h, opts) {
+    const o = opts || {};
+    const zk = zoneKind || o.zoneKind || 'event';
+    const idStr = String(o.id || ('zone_' + (zoneIdSeq++)));
+    const zTag = String(o.zoneId || o.tagId || (zk === 'exit' ? 'exit_1' : 'event_1')).trim();
+    return {
+      id: idStr,
+      zoneKind: zk,
+      x: Math.round(x),
+      y: Math.round(y),
+      w: Math.max(16, Math.round(w || 80)),
+      h: Math.max(16, Math.round(h || 80)),
+      zoneId: zTag,
+      tagId: zTag,
+      requiresUnlock: String(o.requiresUnlock || '').trim()
+    };
+  }
+
+  function createInitialOilLamps() {
+    const dx = LAYOUT.canyonDx;
+    return [
+      makeOilLamp(195, SALOON.y + 60),    // на барной стойке в салуне
+      makeOilLamp(267, SALOON.y + 366),   // на столике в салуне
+      makeOilLamp(577, 322),              // на ящике crate_1 на улице
+      makeOilLamp(752, 370),              // у повозки wagon_1
+      makeOilLamp(LAYOUT.bridge.x + 28, LAYOUT.bridge.y + 18), // у моста
+      makeOilLamp(1657 + dx, 148),        // северная засада каньона
+      makeOilLamp(2237 + dx, 458)         // восточная засада каньона
+    ];
   }
 
   function createInitialSheep(solids) {
@@ -2405,20 +3427,44 @@
   }
 
   G.WORLD = {
-    create() {
-      // Расширенная карта: восток (каньон) + юг (двор-загон)
-      const width = MAP_W;
-      const height = MAP_H;
+    create(mapData) {
+      const hasCustomMap = !!(mapData && typeof mapData === 'object' && mapData.id !== 'default');
+      const isBlank = !!(hasCustomMap && mapData.isBlank);
+      const baseTerrain = (hasCustomMap && ['dirt', 'canyon', 'grass', 'wood'].includes(mapData.baseTerrain))
+        ? mapData.baseTerrain
+        : 'dirt';
+      const width = isBlank
+        ? G.MATH.clamp(Math.round(mapData.width || 1400), 640, 4800)
+        : MAP_W;
+      const height = isBlank
+        ? G.MATH.clamp(Math.round(mapData.height || 840), 480, 2400)
+        : MAP_H;
+      const playerSpawn = (hasCustomMap && mapData.playerSpawn && typeof mapData.playerSpawn.x === 'number' && typeof mapData.playerSpawn.y === 'number')
+        ? { x: Math.round(mapData.playerSpawn.x), y: Math.round(mapData.playerSpawn.y) }
+        : (isBlank ? { x: Math.round(width * 0.5), y: Math.round(height * 0.5) } : { x: LAYOUT.playerSpawn.x, y: LAYOUT.playerSpawn.y });
+      const mapMeta = {
+        id: (hasCustomMap && mapData.id) ? String(mapData.id) : 'default',
+        name: (hasCustomMap && mapData.name) ? String(mapData.name) : DEFAULT_MAP_NAME,
+        isBlank: isBlank,
+        width: width,
+        height: height,
+        baseTerrain: baseTerrain,
+        playerSpawn: playerSpawn,
+        terrainTiles: (hasCustomMap && Array.isArray(mapData.terrainTiles)) ? mapData.terrainTiles.slice() : [],
+        zones: (hasCustomMap && Array.isArray(mapData.zones)) ? mapData.zones.slice() : [],
+        civilians: (hasCustomMap && Array.isArray(mapData.civilians)) ? mapData.civilians.slice() : []
+      };
 
       const dx = LAYOUT.canyonDx;
       const dy = LAYOUT.canyonDy;
 
       const LOCKED_SALOON_IDS = {
         sal_left: true, sal_top: true, sal_bot: true, sal_right1: true, sal_right2: true,
-        sal_bar: true, sal_pillar: true, sal_pillar2: true
+        sal_bar: true, sal_pillar: true, sal_pillar2: true,
+        bld_n1: true, bld_n2: true, bld_n3: true, bld_s1: true, bld_s2: true, bld_s3: true
       };
 
-      const solids = [
+      const solids = isBlank ? [] : [
         // --- САЛУН (расширенный 440x460, привязан строго к SALOON / LAYOUT) ---
         { id: 'sal_left',   x: SALOON.x,                y: SALOON.y,             w: 16,           h: SALOON.h,            mat: 'wood', type: 'wall', high: true, isCover: true, locked: true },
         { id: 'sal_top',    x: SALOON.x,                y: SALOON.y,             w: SALOON.w,     h: 16,                  mat: 'wood', type: 'wall', high: true, isCover: true, locked: true },
@@ -2484,7 +3530,9 @@
         { id: 'barrel_2', x: 752,  y: 568, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
         { id: 'barrel_3', x: 1120, y: 242, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
         { id: 'barrel_4', x: 868,  y: 268, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
-        { id: 'crate_st1',x: 1210, y: 486, w: 34, h: 32, mat: 'wood',  type: 'crate',        high: false, isCover: true },
+        { id: 'crate_st1',     x: 1210, y: 486, w: 34, h: 32, mat: 'wood',  type: 'crate',       high: false, isCover: true },
+        { id: 'iron_barrel_1', x: 646,  y: 356, w: 26, h: 26, mat: 'metal', type: 'iron_barrel', high: false, isCover: true },
+        { id: 'iron_stove_1',  x: 1246, y: 666, w: 24, h: 24, mat: 'metal', type: 'iron_stove',  high: true,  isCover: true },
 
         // Низкие каменные стенки на улице и перед площадью каньона
         { id: 'lwall_1', x: 618,  y: 472, w: 72, h: 14, mat: 'rock', type: 'low_wall', high: false, isCover: true },
@@ -2543,8 +3591,9 @@
 
         // Средняя перемычка-разветвление
         { id: 'rock_10',  x: 1815 + dx, y: 295, w: 46, h: 42, mat: 'rock', type: 'boulder', high: false, isCover: true },
-        { id: 'crate_11', x: 1850 + dx, y: 585, w: 34, h: 32, mat: 'wood', type: 'crate', high: false, isCover: true },
-        { id: 'trough_2', x: 1795 + dx, y: 690, w: 54, h: 22, mat: 'water', type: 'trough', high: false, isCover: true },
+        { id: 'crate_11',  x: 1850 + dx, y: 585, w: 34, h: 32, mat: 'wood',  type: 'crate',       high: false, isCover: true },
+        { id: 'mine_cart_1', x: 1810 + dx, y: 468, w: 44, h: 26, mat: 'metal', type: 'mine_cart',  high: true,  isCover: true },
+        { id: 'trough_2',  x: 1795 + dx, y: 690, w: 54, h: 22, mat: 'water', type: 'trough',      high: false, isCover: true },
 
         // Восточные коридоры
         { id: 'rock_e1',   x: 2110 + dx, y: 122, w: 44, h: 38, mat: 'rock', type: 'boulder', high: false, isCover: true },
@@ -2557,8 +3606,9 @@
 
         // Восточный котёл вокруг шпиля
         { id: 'lwall_e2',  x: 2445 + dx, y: 396, w: 72, h: 14, mat: 'rock', type: 'low_wall', high: false, isCover: true },
-        { id: 'crate_e3',  x: 2485 + dx, y: 230, w: 34, h: 32, mat: 'wood', type: 'crate', high: false, isCover: true },
-        { id: 'barrel_e2', x: 2748 + dx, y: 340, w: 26, h: 26, mat: 'water', type: 'water_barrel', high: false, isCover: true },
+        { id: 'crate_e3',      x: 2485 + dx, y: 230, w: 34, h: 32, mat: 'wood',  type: 'crate',       high: false, isCover: true },
+        { id: 'iron_barrel_2', x: 2565 + dx, y: 380, w: 26, h: 26, mat: 'metal', type: 'iron_barrel', high: false, isCover: true },
+        { id: 'barrel_e2',     x: 2748 + dx, y: 340, w: 26, h: 26, mat: 'water', type: 'water_barrel',high: false, isCover: true },
         { id: 'wagon_6',   x: 2735 + dx, y: 478, w: 62, h: 28, mat: 'wood', type: 'wagon', high: true, isCover: true },
         { id: 'hay_5',     x: 2610 + dx, y: 635, w: 34, h: 24, mat: 'hay', type: 'hay', high: false, isCover: true },
         { id: 'rock_e2',   x: 2755 + dx, y: 638, w: 46, h: 42, mat: 'rock', type: 'boulder', high: false, isCover: true },
@@ -2585,7 +3635,7 @@
       ];
 
       // Телеграфные столбы с проводами вдоль удлинённой улицы
-      const poles = [
+      const poles = isBlank ? [] : [
         { x: 520,  y: STREET_TOP + 8 },
         { x: 740,  y: STREET_TOP + 4 },
         { x: 965,  y: STREET_TOP + 7 },
@@ -2594,7 +3644,7 @@
       ];
 
       // Оливковые деревья на окраине площади, в южном дворе и в карманах каньона
-      const trees = [
+      const trees = isBlank ? [] : [
         { x: 730,       y: STREET_TOP - 10, r: 18 },
         { x: 1320,      y: STREET_BOT - 12, r: 22 },
         { x: 1370,      y: STREET_MID + 20, r: 26 },
@@ -2607,8 +3657,9 @@
 
       function clonePlainSolid(s) {
         const isRail = s.id === 'bridge_rail_n' || s.id === 'bridge_rail_s';
-        const isLocked = !!s.locked || !!LOCKED_SALOON_IDS[s.id] || s.type === 'building';
-        const passThrough = isRail || !!s.passThroughBullets;
+        const isLocked = !!s.locked || (!isBlank && !!LOCKED_SALOON_IDS[s.id]);
+        const passThrough = isRail || !!s.passThroughBullets || s.type === 'chair' || s.type === 'campfire' || s.type === 'skull';
+        const walkThrough = !!s.walkThrough || s.type === 'skull' || s.type === 'campfire';
         const lowCoverPass = s.type === 'crate' || !!s.lowCoverPassThrough;
         return {
           id: s.id,
@@ -2619,11 +3670,14 @@
           mat: s.mat || 'wood',
           type: s.type || 'wall',
           high: !!s.high,
-          isCover: passThrough ? false : (s.isCover !== undefined ? !!s.isCover : true),
+          rotated: !!s.rotated,
+          isCover: (passThrough || walkThrough) ? false : (s.isCover !== undefined ? !!s.isCover : true),
           locked: isLocked,
           passThroughBullets: passThrough,
+          walkThrough: walkThrough,
           lowCoverPassThrough: lowCoverPass,
           isHitchingPost: !!s.isHitchingPost,
+          showFacade: s.showFacade !== undefined ? !!s.showFacade : undefined,
           signText: s.signText,
           buildingType: s.buildingType,
           roof: s.roof,
@@ -2636,63 +3690,78 @@
           signColor: s.signColor,
           facadeColor: s.facadeColor,
           interior: !!s.interior,
-          edgeEast: !!s.edgeEast
+          edgeEast: !!s.edgeEast,
+          tagId: s.tagId ? String(s.tagId) : '',
+          requiresUnlock: s.requiresUnlock ? String(s.requiresUnlock) : ''
         };
       }
 
       const defaultSolidsSnapshot = solids.map(clonePlainSolid);
-      const defaultTreesSnapshot = trees.map((tr) => ({ x: Math.round(tr.x), y: Math.round(tr.y), r: tr.r || 20 }));
-      const defaultPolesSnapshot = poles.map((pl) => ({ x: Math.round(pl.x), y: Math.round(pl.y) }));
-      let savedExtras = null;
+      const defaultTreesSnapshot = trees.map((tr) => ({ x: Math.round(tr.x), y: Math.round(tr.y), r: tr.r || 20, tagId: tr.tagId || '', requiresUnlock: tr.requiresUnlock || '' }));
+      const defaultPolesSnapshot = poles.map((pl) => ({ x: Math.round(pl.x), y: Math.round(pl.y), tagId: pl.tagId || '', requiresUnlock: pl.requiresUnlock || '' }));
+      let savedExtras = hasCustomMap ? mapData : null;
 
-      // Если пользователь сохранил свою карту в редакторе, восстанавливаем её из localStorage
-      try {
-        const rawMap = localStorage.getItem(MAP_STORAGE_KEY);
-        if (rawMap) {
-          const parsed = JSON.parse(rawMap);
-          const solidList = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.solids) ? parsed.solids : null);
-          if (solidList && solidList.length > 0) {
-            solids.length = 0;
-            for (let i = 0; i < solidList.length; i++) {
-              const item = solidList[i];
-              if (item && typeof item.x === 'number' && typeof item.y === 'number' && item.w > 0 && item.h > 0) {
-                solids.push(clonePlainSolid(item));
-              }
+      // При запуске библиотеки мигрируем старый gunfighter_custom_map_v2 в новую библиотеку (один раз)
+      if (!hasCustomMap) {
+        readMapsLibraryRaw();
+      }
+
+      if (savedExtras) {
+        if (Array.isArray(savedExtras.solids) && (isBlank || savedExtras.solids.length > 0)) {
+          solids.length = 0;
+          for (let i = 0; i < savedExtras.solids.length; i++) {
+            const item = savedExtras.solids[i];
+            if (item && typeof item.x === 'number' && typeof item.y === 'number' && item.w > 0 && item.h > 0) {
+              solids.push(clonePlainSolid(item));
             }
-          }
-          if (parsed && !Array.isArray(parsed) && typeof parsed === 'object') {
-            if (Array.isArray(parsed.trees)) {
-              trees.length = 0;
-              for (let i = 0; i < parsed.trees.length; i++) {
-                const tr = parsed.trees[i];
-                if (tr && typeof tr.x === 'number' && typeof tr.y === 'number') {
-                  trees.push({ x: Math.round(tr.x), y: Math.round(tr.y), r: tr.r || 22 });
-                }
-              }
-            }
-            if (Array.isArray(parsed.poles)) {
-              poles.length = 0;
-              for (let i = 0; i < parsed.poles.length; i++) {
-                const pl = parsed.poles[i];
-                if (pl && typeof pl.x === 'number' && typeof pl.y === 'number') {
-                  poles.push({ x: Math.round(pl.x), y: Math.round(pl.y) });
-                }
-              }
-            }
-            savedExtras = parsed;
           }
         }
-      } catch (_) {}
+        if (Array.isArray(savedExtras.trees)) {
+          trees.length = 0;
+          for (let i = 0; i < savedExtras.trees.length; i++) {
+            const tr = savedExtras.trees[i];
+            if (tr && typeof tr.x === 'number' && typeof tr.y === 'number') {
+              trees.push({
+                x: Math.round(tr.x), y: Math.round(tr.y), r: tr.r || 22,
+                tagId: tr.tagId ? String(tr.tagId) : '',
+                requiresUnlock: tr.requiresUnlock ? String(tr.requiresUnlock) : ''
+              });
+            }
+          }
+        }
+        if (Array.isArray(savedExtras.poles)) {
+          poles.length = 0;
+          for (let i = 0; i < savedExtras.poles.length; i++) {
+            const pl = savedExtras.poles[i];
+            if (pl && typeof pl.x === 'number' && typeof pl.y === 'number') {
+              poles.push({
+                x: Math.round(pl.x), y: Math.round(pl.y),
+                tagId: pl.tagId ? String(pl.tagId) : '',
+                requiresUnlock: pl.requiresUnlock ? String(pl.requiresUnlock) : ''
+              });
+            }
+          }
+        }
+      }
 
-      // Гарантируем locked и passThrough-флаги на всех объектах (включая старые сохранения)
+      // Гарантируем locked и passThrough-флаги на объектах (стандартные здания locked, пользовательские — разблокированы)
       for (let i = 0; i < solids.length; i++) {
         const s = solids[i];
-        if (LOCKED_SALOON_IDS[s.id] || s.type === 'building') s.locked = true;
+        if (!isBlank && LOCKED_SALOON_IDS[s.id]) s.locked = true;
         if (s.id === 'bridge_rail_n' || s.id === 'bridge_rail_s') {
           s.passThroughBullets = true;
           s.isCover = false;
         }
         if (s.type === 'crate') s.lowCoverPassThrough = true;
+        if (s.type === 'skull' || s.type === 'campfire') {
+          s.walkThrough = true;
+          s.passThroughBullets = true;
+          s.isCover = false;
+        }
+        if (s.type === 'chair') {
+          s.passThroughBullets = true;
+          s.isCover = false;
+        }
       }
 
       bakeSolidSprites(solids, trees);
@@ -2719,6 +3788,7 @@
         }
         for (let i = 0; i < solids.length; i++) {
           const s = solids[i];
+          if (s.walkThrough || s._storyHidden) continue;
           const segs = rectToSegments(s);
           for (let j = 0; j < segs.length; j++) {
             const seg = segs[j];
@@ -2768,21 +3838,107 @@
         return out;
       }
 
-      const doors = [
-        { hingeX: LAYOUT.doorHingeX, hingeY: LAYOUT.doorY1 + 2, len: 38, baseAngle: Math.PI / 2,  angle: 0, vel: 0 },
-        { hingeX: LAYOUT.doorHingeX, hingeY: LAYOUT.doorY2 - 2, len: 38, baseAngle: -Math.PI / 2, angle: 0, vel: 0 }
+      const doors = isBlank ? [] : [
+        { pairId: 'saloon_main_door', isDefault: true, locked: true, hingeX: LAYOUT.doorHingeX, hingeY: LAYOUT.doorY1 + 2, len: 38, baseAngle: Math.PI / 2,  angle: 0, vel: 0 },
+        { pairId: 'saloon_main_door', isDefault: true, locked: true, hingeX: LAYOUT.doorHingeX, hingeY: LAYOUT.doorY2 - 2, len: 38, baseAngle: -Math.PI / 2, angle: 0, vel: 0 }
       ];
 
-      const saloonZone = { id: 'saloon', x: SALOON.x, y: SALOON.y, w: SALOON.w, h: SALOON.h };
+      const saloonZone = isBlank ? null : { id: 'saloon', x: SALOON.x, y: SALOON.y, w: SALOON.w, h: SALOON.h };
 
-      const initialTargets = createInitialTargets(width, height, solids);
+      const initialTargets = isBlank ? [] : createInitialTargets(width, height, solids);
       const defaultBottlesSnapshot = initialTargets
         .filter((t) => t.kind === 'bottle')
         .map((t) => ({ x: Math.round(t.x), y: Math.round(t.y) }));
-      let initialHorse = makeHorse(solids);
-      let initialSheep = createInitialSheep(solids);
+      let initialHorse = isBlank ? null : makeHorse(solids);
+      let initialSheep = isBlank ? [] : createInitialSheep(solids);
+      let initialCrows = isBlank ? [] : createInitialCrows();
+      let initialLizards = isBlank ? [] : createInitialLizards(solids);
+      let initialSnakes = isBlank ? [] : createInitialSnakes(solids);
+      let initialOilLamps = isBlank ? [] : createInitialOilLamps();
+      const initialInteractables = isBlank ? [] : [
+        { id: 'saloon_bourbon', kind: 'bourbon', x: 125, y: SALOON.y + 350, label: 'ВЫПИТЬ БУРБОН', r: 46 },
+        { id: 'saloon_hatrack', kind: 'hatrack', x: 64,  y: SALOON.y + 132, label: 'СМЕНИТЬ ШЛЯПУ', r: 44 },
+        { id: 'saloon_medkit',  kind: 'medkit',  x: 380, y: SALOON.y + 66,  label: 'ВЗЯТЬ БИНТЫ',  r: 44 }
+      ];
+      const initialCivilians = [];
+      const initialZones = [];
+      const tileCols = Math.ceil(width / 32);
+      const tileRows = Math.ceil(height / 32);
+      const terrainTiles = [];
+      const terrainTileGrid = new Array(tileCols * tileRows);
 
       if (savedExtras) {
+        if (Array.isArray(savedExtras.doors) && savedExtras.doors.length > 0) {
+          const hasDefaultInSaved = savedExtras.doors.some((dr) => dr && dr.isDefault);
+          if (isBlank || hasDefaultInSaved) doors.length = 0;
+          for (let i = 0; i < savedExtras.doors.length; i++) {
+            const dr = savedExtras.doors[i];
+            if (!dr || typeof dr.hingeX !== 'number' || typeof dr.hingeY !== 'number') continue;
+            doors.push({
+              pairId: String(dr.pairId || ('dp_loaded_' + Math.floor(i / 2))),
+              isDefault: !!dr.isDefault,
+              locked: dr.locked !== undefined ? !!dr.locked : !!dr.isDefault,
+              hingeX: Math.round(dr.hingeX),
+              hingeY: Math.round(dr.hingeY),
+              len: Math.max(12, Math.round(dr.len || 38)),
+              baseAngle: typeof dr.baseAngle === 'number' ? dr.baseAngle : Math.PI / 2,
+              angle: 0,
+              vel: 0,
+              tagId: dr.tagId ? String(dr.tagId) : '',
+              requiresUnlock: dr.requiresUnlock ? String(dr.requiresUnlock) : ''
+            });
+          }
+        }
+        if (Array.isArray(savedExtras.interactables) && (isBlank || savedExtras.interactables.length > 0)) {
+          initialInteractables.length = 0;
+          for (let i = 0; i < savedExtras.interactables.length; i++) {
+            const it = savedExtras.interactables[i];
+            if (!it || typeof it.x !== 'number' || typeof it.y !== 'number') continue;
+            initialInteractables.push({
+              id: String(it.id || ('int_' + (i + 1))),
+              kind: String(it.kind || 'dartboard'),
+              x: Math.round(it.x),
+              y: Math.round(it.y),
+              label: String(it.label || 'ВЗАИМОДЕЙСТВИЕ'),
+              r: it.r || 44,
+              tagId: it.tagId ? String(it.tagId) : '',
+              requiresUnlock: it.requiresUnlock ? String(it.requiresUnlock) : ''
+            });
+          }
+        }
+        if (Array.isArray(savedExtras.civilians)) {
+          for (let i = 0; i < savedExtras.civilians.length; i++) {
+            const cv = savedExtras.civilians[i];
+            if (cv && typeof cv.x === 'number' && typeof cv.y === 'number') {
+              initialCivilians.push(makeCivilian(cv.subType, cv.x, cv.y, cv));
+            }
+          }
+        }
+        if (Array.isArray(savedExtras.zones)) {
+          for (let i = 0; i < savedExtras.zones.length; i++) {
+            const zn = savedExtras.zones[i];
+            if (zn && typeof zn.x === 'number' && typeof zn.y === 'number') {
+              initialZones.push(makeZone(zn.zoneKind, zn.x, zn.y, zn.w, zn.h, zn));
+            }
+          }
+        }
+        if (Array.isArray(savedExtras.terrainTiles)) {
+          for (let i = 0; i < savedExtras.terrainTiles.length; i++) {
+            const tl = savedExtras.terrainTiles[i];
+            if (!tl || typeof tl.tx !== 'number' || typeof tl.ty !== 'number' || !tl.type) continue;
+            const tx = Math.floor(tl.tx);
+            const ty = Math.floor(tl.ty);
+            if (tx < 0 || tx >= tileCols || ty < 0 || ty >= tileRows) continue;
+            const idx = ty * tileCols + tx;
+            if (!terrainTileGrid[idx]) {
+              const entry = { tx, ty, type: String(tl.type) };
+              terrainTileGrid[idx] = entry;
+              terrainTiles.push(entry);
+            } else {
+              terrainTileGrid[idx].type = String(tl.type);
+            }
+          }
+        }
         if (Array.isArray(savedExtras.bottles)) {
           for (let i = initialTargets.length - 1; i >= 0; i--) {
             if (initialTargets[i].kind === 'bottle') initialTargets.splice(i, 1);
@@ -2802,7 +3958,9 @@
                 alive: true,
                 hitFlash: 0,
                 wobble: 0,
-                respawnTimer: 0
+                respawnTimer: 0,
+                tagId: bt.tagId ? String(bt.tagId) : '',
+                requiresUnlock: bt.requiresUnlock ? String(bt.requiresUnlock) : ''
               });
             }
           }
@@ -2829,6 +3987,9 @@
               hatBand: sb.hatBand || P.brass[1],
               bandana: sb.bandana || P.barnRed[1]
             });
+            b.npcId = sb.npcId ? String(sb.npcId) : '';
+            b.tagId = sb.tagId ? String(sb.tagId) : b.npcId;
+            b.requiresUnlock = sb.requiresUnlock ? String(sb.requiresUnlock) : '';
             b.patrolWaypoints = buildPatrolWaypoints(b.x, b.y, solids);
             initialTargets.push(b);
           }
@@ -2836,6 +3997,7 @@
         if (savedExtras.horse === null) {
           initialHorse = null;
         } else if (savedExtras.horse && typeof savedExtras.horse.x === 'number' && typeof savedExtras.horse.y === 'number') {
+          if (!initialHorse) initialHorse = makeHorse(solids);
           if (initialHorse) {
             initialHorse.x = Math.round(savedExtras.horse.x);
             initialHorse.y = Math.round(savedExtras.horse.y);
@@ -2843,6 +4005,8 @@
             initialHorse.homeY = initialHorse.y;
             initialHorse.tied = false;
             initialHorse.state = 'idle';
+            initialHorse.tagId = savedExtras.horse.tagId ? String(savedExtras.horse.tagId) : '';
+            initialHorse.requiresUnlock = savedExtras.horse.requiresUnlock ? String(savedExtras.horse.requiresUnlock) : '';
           }
         }
         if (Array.isArray(savedExtras.sheep)) {
@@ -2850,21 +4014,87 @@
           for (let i = 0; i < savedExtras.sheep.length; i++) {
             const sh = savedExtras.sheep[i];
             if (sh && typeof sh.x === 'number' && typeof sh.y === 'number') {
-              initialSheep.push(makeSheep(sh.x, sh.y, sh.id));
+              const sObj = makeSheep(sh.x, sh.y, sh.id);
+              sObj.tagId = sh.tagId ? String(sh.tagId) : '';
+              sObj.requiresUnlock = sh.requiresUnlock ? String(sh.requiresUnlock) : '';
+              initialSheep.push(sObj);
             }
           }
+        }
+        if (Array.isArray(savedExtras.crows)) {
+          initialCrows = [];
+          for (let i = 0; i < savedExtras.crows.length; i++) {
+            const cr = savedExtras.crows[i];
+            if (cr && typeof cr.x === 'number' && typeof cr.y === 'number') {
+              const cObj = makeCrow(cr.x, cr.y, cr.id);
+              cObj.tagId = cr.tagId ? String(cr.tagId) : '';
+              cObj.requiresUnlock = cr.requiresUnlock ? String(cr.requiresUnlock) : '';
+              initialCrows.push(cObj);
+            }
+          }
+        }
+        if (Array.isArray(savedExtras.snakes)) {
+          initialSnakes = [];
+          for (let i = 0; i < savedExtras.snakes.length; i++) {
+            const sn = savedExtras.snakes[i];
+            if (sn && typeof sn.x === 'number' && typeof sn.y === 'number') {
+              const nObj = makeSnake(sn.x, sn.y, sn.id);
+              nObj.tagId = sn.tagId ? String(sn.tagId) : '';
+              nObj.requiresUnlock = sn.requiresUnlock ? String(sn.requiresUnlock) : '';
+              initialSnakes.push(nObj);
+            }
+          }
+        }
+        if (Array.isArray(savedExtras.oilLamps)) {
+          initialOilLamps = [];
+          for (let i = 0; i < savedExtras.oilLamps.length; i++) {
+            const lm = savedExtras.oilLamps[i];
+            if (lm && typeof lm.x === 'number' && typeof lm.y === 'number') {
+              const lObj = makeOilLamp(lm.x, lm.y, lm.id);
+              lObj.tagId = lm.tagId ? String(lm.tagId) : '';
+              lObj.requiresUnlock = lm.requiresUnlock ? String(lm.requiresUnlock) : '';
+              initialOilLamps.push(lObj);
+            }
+          }
+        }
+      }
+
+      const bgCanvas = isBlank ? bakeBlankBackground(width, height, baseTerrain) : bakeBackground(width, height);
+      const bgCtx = bgCanvas.getContext('2d');
+      bgCtx.imageSmoothingEnabled = false;
+      if (terrainTiles.length > 0) {
+        const P = getPal();
+        for (let i = 0; i < terrainTiles.length; i++) {
+          const tl = terrainTiles[i];
+          const px = tl.tx * 32;
+          const py = tl.ty * 32;
+          const pw = Math.min(32, width - px);
+          const ph = Math.min(32, height - py);
+          if (pw > 0 && ph > 0) paintTerrainPatchToCtx(bgCtx, px, py, pw, ph, tl.type, P);
         }
       }
 
       const world = {
         width,
         height,
+        isBlank,
+        baseTerrain,
+        playerSpawn,
+        mapMeta,
+        tileCols,
+        tileRows,
+        terrainTiles,
+        terrainTileGrid,
+        civilians: initialCivilians,
+        zones: initialZones,
         layout: LAYOUT,
         solids,
-        covers: solids.filter((s) => s.isCover),
+        covers: solids.filter((s) => s.isCover && !s._storyHidden && !s.walkThrough),
         waterBarrels: solids.filter((s) => s.type === 'water_barrel'),
         waterContainers: solids.filter((s) => s.type === 'water_barrel' || s.type === 'trough'),
         puddles: [],
+        oilPuddles: [],
+        oilLamps: initialOilLamps,
         poles,
         trees,
         wallSegments,
@@ -2874,22 +4104,21 @@
         queryWallSegments,
         doors,
         // Интерьер салуна и список закрытых помещений (для порохового дыма, теней и логики зон)
-        saloon: { ...saloonZone },
-        indoorZones: [saloonZone],
-        interactables: [
-          { id: 'saloon_bourbon', kind: 'bourbon', x: 125, y: SALOON.y + 350, label: 'ВЫПИТЬ БУРБОН', r: 46 },
-          { id: 'saloon_hatrack', kind: 'hatrack', x: 64,  y: SALOON.y + 132, label: 'СМЕНИТЬ ШЛЯПУ', r: 44 },
-          { id: 'saloon_medkit',  kind: 'medkit',  x: 380, y: SALOON.y + 66,  label: 'ВЗЯТЬ БИНТЫ',  r: 44 }
-        ],
+        saloon: saloonZone ? { ...saloonZone } : null,
+        indoorZones: saloonZone ? [saloonZone] : [],
+        interactables: initialInteractables,
         streetShift: STREET_SHIFT,
         streetTop: STREET_TOP,
         streetBot: STREET_BOT,
         spawnTimer: 0,
         targets: initialTargets,
-        birdFlocks: buildBirdFlocks(solids),
+        birdFlocks: isBlank ? [] : buildBirdFlocks(solids),
+        crows: initialCrows,
+        lizards: initialLizards,
+        snakes: initialSnakes,
         horse: initialHorse,
         sheep: initialSheep,
-        bgCanvas: bakeBackground(width, height),
+        bgCanvas,
 
         initDestructibleProps,
         bakeSolidSprites(targetSolids, targetTrees) {
@@ -2897,16 +4126,87 @@
         },
 
         rebuildGeometry() {
-          world.covers = world.solids.filter((s) => s.isCover);
-          world.waterBarrels = world.solids.filter((s) => s.type === 'water_barrel');
-          world.waterContainers = world.solids.filter((s) => s.type === 'water_barrel' || s.type === 'trough');
+          world.covers = world.solids.filter((s) => s.isCover && !s._storyHidden && !s.walkThrough);
+          world.waterBarrels = world.solids.filter((s) => s.type === 'water_barrel' && !s._storyHidden);
+          world.waterContainers = world.solids.filter((s) => (s.type === 'water_barrel' || s.type === 'trough') && !s._storyHidden);
           fillSegmentsFromSolids();
+        },
+
+        isEntityActive(ent, state) {
+          if (!ent || !ent.requiresUnlock) return true;
+          if (state && state.editor && state.editor.active) return true;
+          return G.isUnlocked ? G.isUnlocked(ent.requiresUnlock, state) : true;
+        },
+
+        rebuildStoryVisibility(state) {
+          let changed = false;
+          const isEd = !!(state && state.editor && state.editor.active);
+          const isStory = !!(state && state.storyMode);
+          for (let i = 0; i < world.solids.length; i++) {
+            const s = world.solids[i];
+            const hide = !!(isStory && !isEd && s.requiresUnlock && !(G.isUnlocked && G.isUnlocked(s.requiresUnlock, state)));
+            if (!!s._storyHidden !== hide) {
+              s._storyHidden = hide;
+              changed = true;
+            }
+          }
+          if (changed) world.rebuildGeometry();
+        },
+
+        paintTerrainTile(tx, ty, type) {
+          const ix = Math.floor(tx);
+          const iy = Math.floor(ty);
+          if (ix < 0 || ix >= world.tileCols || iy < 0 || iy >= world.tileRows) return false;
+          const gridIdx = iy * world.tileCols + ix;
+          const px = ix * 32;
+          const py = iy * 32;
+          const pw = Math.min(32, world.width - px);
+          const ph = Math.min(32, world.height - py);
+          if (pw <= 0 || ph <= 0) return false;
+          const bCtx = world.bgCanvas ? world.bgCanvas.getContext('2d') : null;
+          if (bCtx) bCtx.imageSmoothingEnabled = false;
+          const P = getPal();
+
+          if (!type || type === 'erase_tile') {
+            const existing = world.terrainTileGrid[gridIdx];
+            if (!existing) return false;
+            world.terrainTileGrid[gridIdx] = null;
+            const arrIdx = world.terrainTiles.indexOf(existing);
+            if (arrIdx >= 0) world.terrainTiles.splice(arrIdx, 1);
+            if (bCtx) {
+              if (world.isBlank) {
+                paintTerrainPatchToCtx(bCtx, px, py, pw, ph, world.baseTerrain || 'dirt', P);
+              } else {
+                if (!world._cleanBgCanvas) world._cleanBgCanvas = bakeBackground(world.width, world.height);
+                bCtx.drawImage(world._cleanBgCanvas, px, py, pw, ph, px, py, pw, ph);
+              }
+            }
+            return true;
+          }
+
+          const existing = world.terrainTileGrid[gridIdx];
+          if (existing && existing.type === type) return false;
+          if (existing) {
+            existing.type = String(type);
+          } else {
+            const rec = { tx: ix, ty: iy, type: String(type) };
+            world.terrainTileGrid[gridIdx] = rec;
+            world.terrainTiles.push(rec);
+          }
+          if (bCtx) {
+            paintTerrainPatchToCtx(bCtx, px, py, pw, ph, type, P);
+          }
+          return true;
         },
 
         editorSeq: 1,
 
         addEditorSolid(opts) {
           const tpl = opts || {};
+          const sType = tpl.solidType || tpl.type || 'crate';
+          const isChair = sType === 'chair';
+          const isSkull = sType === 'skull';
+          const isCampfire = sType === 'campfire';
           const s = {
             id: tpl.id || ('ed_' + Date.now().toString(36) + '_' + (world.editorSeq++)),
             x: Math.round(tpl.x || 0),
@@ -2914,17 +4214,97 @@
             w: Math.max(8, Math.round(tpl.w || 32)),
             h: Math.max(8, Math.round(tpl.h || 32)),
             mat: tpl.mat || 'wood',
-            type: tpl.type || 'crate',
+            type: sType,
             high: !!tpl.high,
-            isCover: tpl.isCover !== undefined ? !!tpl.isCover : true,
-            isHitchingPost: !!tpl.isHitchingPost || tpl.type === 'hitching_post',
-            interior: !!tpl.interior || tpl.type === 'cliff'
+            rotated: !!tpl.rotated,
+            isCover: (isChair || isSkull || isCampfire) ? false : (tpl.isCover !== undefined ? !!tpl.isCover : true),
+            passThroughBullets: !!(tpl.passThroughBullets || isChair || isSkull || isCampfire),
+            walkThrough: !!(tpl.walkThrough || isSkull || isCampfire),
+            locked: false,
+            isHitchingPost: !!tpl.isHitchingPost || sType === 'hitching_post',
+            interior: !!tpl.interior || sType === 'cliff',
+            showFacade: sType === 'building' ? (tpl.showFacade !== undefined ? !!tpl.showFacade : true) : undefined,
+            signText: tpl.signText,
+            buildingType: tpl.buildingType,
+            wallPalKey: tpl.wallPalKey,
+            roofPalKey: tpl.roofPalKey,
+            roofStyle: tpl.roofStyle,
+            chimney: !!tpl.chimney,
+            tagId: tpl.tagId ? String(tpl.tagId) : '',
+            requiresUnlock: tpl.requiresUnlock ? String(tpl.requiresUnlock) : ''
           };
           initDestructibleProps(s);
           bakeSolidSprites([s], []);
           world.solids.push(s);
           world.rebuildGeometry();
           return s;
+        },
+
+        addEditorDoorPair(x, y, w, h, opts) {
+          const o = opts || {};
+          const pairId = o.pairId || ('dp_' + Date.now().toString(36) + '_' + (world.editorSeq++));
+          const horiz = w > h;
+          const span = horiz ? w : h;
+          const len = Math.max(14, Math.round(span * 0.5));
+          const tagId = o.tagId ? String(o.tagId) : '';
+          const req = o.requiresUnlock ? String(o.requiresUnlock) : '';
+          const leaves = horiz
+            ? [
+                { pairId, isDefault: false, locked: false, hingeX: Math.round(x), hingeY: Math.round(y + h * 0.5), len, baseAngle: 0, angle: 0, vel: 0, tagId, requiresUnlock: req },
+                { pairId, isDefault: false, locked: false, hingeX: Math.round(x + len * 2), hingeY: Math.round(y + h * 0.5), len, baseAngle: Math.PI, angle: 0, vel: 0, tagId, requiresUnlock: req }
+              ]
+            : [
+                { pairId, isDefault: false, locked: false, hingeX: Math.round(x + w * 0.5), hingeY: Math.round(y), len, baseAngle: Math.PI / 2, angle: 0, vel: 0, tagId, requiresUnlock: req },
+                { pairId, isDefault: false, locked: false, hingeX: Math.round(x + w * 0.5), hingeY: Math.round(y + len * 2), len, baseAngle: -Math.PI / 2, angle: 0, vel: 0, tagId, requiresUnlock: req }
+              ];
+          world.doors.push(leaves[0], leaves[1]);
+          return leaves;
+        },
+
+        addEditorInteractable(kind, x, y, opts) {
+          const o = opts || {};
+          if (!world.interactables) world.interactables = [];
+          const defLabels = {
+            dartboard: 'СЫГРАТЬ В ДАРТС',
+            notice_board: 'ДОСКА ОБЪЯВЛЕНИЙ',
+            hatrack: 'СМЕНИТЬ ШЛЯПУ',
+            medkit: 'ВЗЯТЬ БИНТЫ',
+            bourbon: 'ВЫПИТЬ БУРБОН'
+          };
+          const it = {
+            id: o.id || ('int_' + Date.now().toString(36) + '_' + (world.editorSeq++)),
+            kind: kind || o.intKind || 'dartboard',
+            x: Math.round(x),
+            y: Math.round(y),
+            label: o.intLabel || o.label || defLabels[kind] || 'ВЗАИМОДЕЙСТВИЕ',
+            r: o.r || 44,
+            tagId: o.tagId ? String(o.tagId) : '',
+            requiresUnlock: o.requiresUnlock ? String(o.requiresUnlock) : ''
+          };
+          world.interactables.push(it);
+          return it;
+        },
+
+        addEditorCivilian(x, y, tpl) {
+          if (!world.civilians) world.civilians = [];
+          const cv = makeCivilian(tpl && tpl.subType, x, y, tpl);
+          world.civilians.push(cv);
+          return cv;
+        },
+
+        addEditorZone(zoneKind, x, y, w, h, opts) {
+          if (!world.zones) world.zones = [];
+          const zn = makeZone(zoneKind, x, y, w, h, opts);
+          world.zones.push(zn);
+          return zn;
+        },
+
+        setEditorPlayerSpawn(x, y) {
+          world.playerSpawn = {
+            x: G.MATH.clamp(Math.round(x), 24, world.width - 24),
+            y: G.MATH.clamp(Math.round(y), 24, world.height - 24)
+          };
+          return world.playerSpawn;
         },
 
         addEditorTree(x, y, r) {
@@ -3012,6 +4392,27 @@
           return sh;
         },
 
+        addEditorOilLamp(x, y) {
+          const lm = makeOilLamp(x, y);
+          if (!world.oilLamps) world.oilLamps = [];
+          world.oilLamps.push(lm);
+          return lm;
+        },
+
+        addEditorCrow(x, y) {
+          const cr = makeCrow(x, y);
+          if (!world.crows) world.crows = [];
+          world.crows.push(cr);
+          return cr;
+        },
+
+        addEditorSnake(x, y) {
+          const sn = makeSnake(x, y);
+          if (!world.snakes) world.snakes = [];
+          world.snakes.push(sn);
+          return sn;
+        },
+
         findSolidAtPoint(x, y) {
           for (let i = world.solids.length - 1; i >= 0; i--) {
             const s = world.solids[i];
@@ -3024,7 +4425,37 @@
         },
 
         findEditorEntityAt(x, y) {
-          // 1. Цели: бандиты и бутылки
+          // 0. Маркер старта игрока
+          if (world.playerSpawn && G.MATH.dist(x, y, world.playerSpawn.x, world.playerSpawn.y) <= 14) {
+            return {
+              kind: 'spawn',
+              obj: world.playerSpawn,
+              x: Math.round(world.playerSpawn.x - 12),
+              y: Math.round(world.playerSpawn.y - 12),
+              w: 24,
+              h: 24,
+              label: 'Старт игрока'
+            };
+          }
+          // 1. Интерактивные точки
+          if (world.interactables) {
+            for (let i = world.interactables.length - 1; i >= 0; i--) {
+              const it = world.interactables[i];
+              if (G.MATH.dist(x, y, it.x, it.y) <= 15) {
+                return {
+                  kind: 'interactable',
+                  obj: it,
+                  index: i,
+                  x: Math.round(it.x - 10),
+                  y: Math.round(it.y - 10),
+                  w: 20,
+                  h: 20,
+                  label: it.label || it.kind
+                };
+              }
+            }
+          }
+          // 2. Цели: бандиты и бутылки
           for (let i = world.targets.length - 1; i >= 0; i--) {
             const t = world.targets[i];
             const rad = t.kind === 'bottle' ? 10 : Math.max(13, (t.r || 11) + 3);
@@ -3041,7 +4472,79 @@
               };
             }
           }
-          // 2. Овцы
+          // 2b. Мирные / сюжетные NPC
+          if (world.civilians) {
+            for (let i = world.civilians.length - 1; i >= 0; i--) {
+              const cv = world.civilians[i];
+              if (G.MATH.dist(x, y, cv.x, cv.y) <= 14) {
+                return {
+                  kind: 'civilian',
+                  obj: cv,
+                  index: i,
+                  x: Math.round(cv.x - 11),
+                  y: Math.round(cv.y - 11),
+                  w: 22,
+                  h: 22,
+                  label: cv.name || 'NPC'
+                };
+              }
+            }
+          }
+          // 2c. Масляные лампы
+          if (world.oilLamps) {
+            for (let i = world.oilLamps.length - 1; i >= 0; i--) {
+              const lm = world.oilLamps[i];
+              if (G.MATH.dist(x, y, lm.x, lm.y) <= 12) {
+                return {
+                  kind: 'oil_lamp',
+                  obj: lm,
+                  index: i,
+                  x: Math.round(lm.x - 8),
+                  y: Math.round(lm.y - 8),
+                  w: 16,
+                  h: 16,
+                  label: 'Масляная лампа'
+                };
+              }
+            }
+          }
+          // 2d. Змеи
+          if (world.snakes) {
+            for (let i = world.snakes.length - 1; i >= 0; i--) {
+              const sn = world.snakes[i];
+              if (G.MATH.dist(x, y, sn.x, sn.y) <= 13) {
+                return {
+                  kind: 'snake',
+                  obj: sn,
+                  index: i,
+                  x: Math.round(sn.x - 10),
+                  y: Math.round(sn.y - 9),
+                  w: 20,
+                  h: 18,
+                  label: 'Змея'
+                };
+              }
+            }
+          }
+          // 2e. Вороны
+          if (world.crows) {
+            for (let i = world.crows.length - 1; i >= 0; i--) {
+              const cr = world.crows[i];
+              if (G.MATH.dist(x, y, cr.x, cr.y) <= 12) {
+                return {
+                  kind: 'crow',
+                  obj: cr,
+                  index: i,
+                  x: Math.round(cr.x - 8),
+                  y: Math.round(cr.y - 8),
+                  w: 16,
+                  h: 16,
+                  label: 'Ворона'
+                };
+              }
+            }
+          }
+          // 3. Овцы
           if (world.sheep) {
             for (let i = world.sheep.length - 1; i >= 0; i--) {
               const sh = world.sheep[i];
@@ -3059,7 +4562,7 @@
               }
             }
           }
-          // 3. Лошадь
+          // 4. Лошадь
           if (world.horse && G.MATH.dist(x, y, world.horse.x, world.horse.y) <= 16) {
             const hr = world.horse;
             return {
@@ -3072,7 +4575,37 @@
               label: 'Лошадь'
             };
           }
-          // 4. Телеграфные столбы
+          // 5. Незащищённые распашные двери
+          if (world.doors && world.doors.length >= 2) {
+            for (let i = world.doors.length - 1; i >= 0; i--) {
+              const d = world.doors[i];
+              if (d.locked || d.isDefault) continue;
+              const partner = world.doors.find((o, oi) => oi !== i && o.pairId && o.pairId === d.pairId);
+              const d0 = partner && i > world.doors.indexOf(partner) ? partner : d;
+              const d1 = partner && d0 !== partner ? partner : null;
+              const isHoriz = Math.abs(Math.cos(d0.baseAngle)) > 0.7;
+              const bx = isHoriz
+                ? Math.round(d1 ? Math.min(d0.hingeX, d1.hingeX) : d0.hingeX)
+                : Math.round(d0.hingeX - 8);
+              const by = isHoriz
+                ? Math.round(d0.hingeY - 8)
+                : Math.round(d1 ? Math.min(d0.hingeY, d1.hingeY) : d0.hingeY);
+              const bw = isHoriz ? Math.max(16, (d1 ? Math.abs(d1.hingeX - d0.hingeX) : d0.len * 2)) : 16;
+              const bh = isHoriz ? 16 : Math.max(16, (d1 ? Math.abs(d1.hingeY - d0.hingeY) : d0.len * 2));
+              if (x >= bx - 4 && x <= bx + bw + 4 && y >= by - 4 && y <= by + bh + 4) {
+                return {
+                  kind: 'door_pair',
+                  obj: d1 ? [d0, d1] : [d0],
+                  x: bx,
+                  y: by,
+                  w: bw,
+                  h: bh,
+                  label: 'Дверь салуна'
+                };
+              }
+            }
+          }
+          // 6. Телеграфные столбы
           if (world.poles) {
             for (let i = world.poles.length - 1; i >= 0; i--) {
               const pl = world.poles[i];
@@ -3090,7 +4623,7 @@
               }
             }
           }
-          // 5. Деревья
+          // 7. Деревья
           if (world.trees) {
             for (let i = world.trees.length - 1; i >= 0; i--) {
               const tr = world.trees[i];
@@ -3109,7 +4642,7 @@
               }
             }
           }
-          // 6. Незащищённые твёрдые объекты (!s.locked)
+          // 8. Незащищённые твёрдые объекты (!s.locked)
           const s = world.findSolidAtPoint(x, y);
           if (s) {
             return {
@@ -3119,16 +4652,166 @@
               y: Math.round(s.y),
               w: Math.round(s.w),
               h: Math.round(s.h),
-              label: s.type
+              label: s.signText || s.type
             };
           }
+          // 9. Триггер-зоны (проверяем последними, чтобы удобно выделять предметы внутри зон)
+          if (world.zones) {
+            for (let i = world.zones.length - 1; i >= 0; i--) {
+              const zn = world.zones[i];
+              if (x >= zn.x && x <= zn.x + zn.w && y >= zn.y && y <= zn.y + zn.h) {
+                return {
+                  kind: 'zone',
+                  obj: zn,
+                  index: i,
+                  x: Math.round(zn.x),
+                  y: Math.round(zn.y),
+                  w: Math.round(zn.w),
+                  h: Math.round(zn.h),
+                  label: (zn.zoneKind === 'exit' ? 'Выезд: ' : 'Зона: ') + (zn.zoneId || zn.tagId || zn.id)
+                };
+              }
+            }
+          }
           return null;
+        },
+
+        moveEditorEntity(hit, nx, ny, state) {
+          if (!hit || !hit.obj) return false;
+          const rx = Math.round(nx);
+          const ry = Math.round(ny);
+          if (hit.kind === 'solid' || hit.kind === 'zone') {
+            const o = hit.obj;
+            o.x = G.MATH.clamp(rx, 4, world.width - o.w - 4);
+            o.y = G.MATH.clamp(ry, 4, world.height - o.h - 4);
+            hit.x = o.x;
+            hit.y = o.y;
+            return true;
+          }
+          if (hit.kind === 'door_pair' && Array.isArray(hit.obj)) {
+            const dx = rx - hit.x;
+            const dy = ry - hit.y;
+            for (let i = 0; i < hit.obj.length; i++) {
+              hit.obj[i].hingeX = Math.round(hit.obj[i].hingeX + dx);
+              hit.obj[i].hingeY = Math.round(hit.obj[i].hingeY + dy);
+            }
+            hit.x = rx;
+            hit.y = ry;
+            return true;
+          }
+          const o = hit.obj;
+          const cx = G.MATH.clamp(rx, 8, world.width - 8);
+          const cy = G.MATH.clamp(ry, 8, world.height - 8);
+          o.x = cx;
+          o.y = cy;
+          if (o.homeX !== undefined) o.homeX = cx;
+          if (o.homeY !== undefined) o.homeY = cy;
+          if (Array.isArray(o.patrolWaypoints) && o.patrolWaypoints.length > 0) {
+            o.patrolWaypoints[0] = { x: cx, y: cy };
+          }
+          hit.x = Math.round(cx - hit.w * 0.5);
+          hit.y = Math.round(cy - hit.h * 0.5);
+          return true;
+        },
+
+        rotateEditorEntity(hit, state) {
+          if (!hit || !hit.obj) return false;
+          if (hit.kind === 'solid') {
+            const s = hit.obj;
+            const rotTypes = {
+              wall: 1, window_wall: 1, bar_counter: 1, fence: 1, low_wall: 1,
+              wagon: 1, trough: 1, mine_cart: 1, cliff: 1, chair: 1, piano: 1
+            };
+            if (!rotTypes[s.type]) return false;
+            if (s.type === 'chair') {
+              s.rotated = !s.rotated;
+              bakeSolidSprites([s], []);
+              return true;
+            }
+            const cx = s.x + s.w * 0.5;
+            const cy = s.y + s.h * 0.5;
+            const nw = s.h;
+            const nh = s.w;
+            s.w = nw;
+            s.h = nh;
+            s.x = G.MATH.clamp(Math.round((cx - nw * 0.5) / 4) * 4, 4, world.width - nw - 4);
+            s.y = G.MATH.clamp(Math.round((cy - nh * 0.5) / 4) * 4, 4, world.height - nh - 4);
+            s.rotated = !s.rotated;
+            bakeSolidSprites([s], []);
+            hit.x = s.x; hit.y = s.y; hit.w = s.w; hit.h = s.h;
+            world.rebuildGeometry();
+            return true;
+          }
+          if (hit.kind === 'door_pair' && Array.isArray(hit.obj) && hit.obj.length >= 2) {
+            const d0 = hit.obj[0];
+            const d1 = hit.obj[1];
+            const cx = Math.round(hit.x + hit.w * 0.5);
+            const cy = Math.round(hit.y + hit.h * 0.5);
+            const len = d0.len || 38;
+            const wasHoriz = Math.abs(Math.cos(d0.baseAngle)) > 0.7;
+            if (wasHoriz) {
+              d0.hingeX = cx; d0.hingeY = cy - len; d0.baseAngle = Math.PI / 2;
+              d1.hingeX = cx; d1.hingeY = cy + len; d1.baseAngle = -Math.PI / 2;
+              hit.x = cx - 8; hit.y = cy - len; hit.w = 16; hit.h = len * 2;
+            } else {
+              d0.hingeX = cx - len; d0.hingeY = cy; d0.baseAngle = 0;
+              d1.hingeX = cx + len; d1.hingeY = cy; d1.baseAngle = Math.PI;
+              hit.x = cx - len; hit.y = cy - 8; hit.w = len * 2; hit.h = 16;
+            }
+            d0.angle = 0; d0.vel = 0; d1.angle = 0; d1.vel = 0;
+            return true;
+          }
+          if (hit.kind === 'zone') {
+            const z = hit.obj;
+            const cx = z.x + z.w * 0.5;
+            const cy = z.y + z.h * 0.5;
+            let nw = 80, nh = 80;
+            if (z.w === 80 && z.h === 80) { nw = 96; nh = 64; }
+            else if (z.w > z.h) { nw = 64; nh = 96; }
+            else { nw = 80; nh = 80; }
+            z.w = nw; z.h = nh;
+            z.x = G.MATH.clamp(Math.round((cx - nw * 0.5) / 4) * 4, 4, world.width - nw - 4);
+            z.y = G.MATH.clamp(Math.round((cy - nh * 0.5) / 4) * 4, 4, world.height - nh - 4);
+            hit.x = z.x; hit.y = z.y; hit.w = z.w; hit.h = z.h;
+            return true;
+          }
+          return false;
         },
 
         removeEditorEntity(hit, state) {
           if (!hit) return false;
           if (hit.kind === 'solid' && hit.obj) {
             return world.removeSolidById(hit.obj.id, state);
+          }
+          if (hit.kind === 'interactable' && world.interactables) {
+            const idx = world.interactables.indexOf(hit.obj);
+            if (idx === -1) return false;
+            world.interactables.splice(idx, 1);
+            return true;
+          }
+          if (hit.kind === 'civilian' && world.civilians) {
+            const idx = world.civilians.indexOf(hit.obj);
+            if (idx === -1) return false;
+            world.civilians.splice(idx, 1);
+            return true;
+          }
+          if (hit.kind === 'zone' && world.zones) {
+            const idx = world.zones.indexOf(hit.obj);
+            if (idx === -1) return false;
+            world.zones.splice(idx, 1);
+            return true;
+          }
+          if (hit.kind === 'door_pair' && Array.isArray(hit.obj) && world.doors) {
+            const pair = hit.obj[0] && hit.obj[0].pairId;
+            let removed = false;
+            for (let i = world.doors.length - 1; i >= 0; i--) {
+              const d = world.doors[i];
+              if (!d.locked && (hit.obj.indexOf(d) !== -1 || (pair && d.pairId === pair))) {
+                world.doors.splice(i, 1);
+                removed = true;
+              }
+            }
+            return removed;
           }
           if (hit.kind === 'target') {
             const idx = world.targets.indexOf(hit.obj);
@@ -3140,6 +4823,24 @@
             const idx = world.sheep.indexOf(hit.obj);
             if (idx === -1) return false;
             world.sheep.splice(idx, 1);
+            return true;
+          }
+          if (hit.kind === 'oil_lamp' && world.oilLamps) {
+            const idx = world.oilLamps.indexOf(hit.obj);
+            if (idx === -1) return false;
+            world.oilLamps.splice(idx, 1);
+            return true;
+          }
+          if (hit.kind === 'snake' && world.snakes) {
+            const idx = world.snakes.indexOf(hit.obj);
+            if (idx === -1) return false;
+            world.snakes.splice(idx, 1);
+            return true;
+          }
+          if (hit.kind === 'crow' && world.crows) {
+            const idx = world.crows.indexOf(hit.obj);
+            if (idx === -1) return false;
+            world.crows.splice(idx, 1);
             return true;
           }
           if (hit.kind === 'horse' && world.horse) {
@@ -3188,12 +4889,64 @@
         },
 
         exportCustomMapData() {
-          return {
-            version: 3,
+          return normalizeMapObj({
+            version: 4,
+            id: (world.mapMeta && world.mapMeta.id) || 'default',
+            name: (world.mapMeta && world.mapMeta.name) || DEFAULT_MAP_NAME,
+            isBlank: !!world.isBlank,
+            width: world.width,
+            height: world.height,
+            baseTerrain: world.baseTerrain || 'dirt',
+            playerSpawn: world.playerSpawn || { x: Math.round(world.width * 0.5), y: Math.round(world.height * 0.5) },
+            terrainTiles: (world.terrainTiles || []).map((tl) => ({ tx: tl.tx, ty: tl.ty, type: tl.type })),
+            doors: (world.doors || []).map((d) => ({
+              pairId: d.pairId || '',
+              isDefault: !!d.isDefault,
+              locked: !!d.locked,
+              hingeX: Math.round(d.hingeX),
+              hingeY: Math.round(d.hingeY),
+              len: Math.round(d.len || 38),
+              baseAngle: d.baseAngle,
+              tagId: d.tagId || '',
+              requiresUnlock: d.requiresUnlock || ''
+            })),
+            interactables: (world.interactables || []).map((it) => ({
+              id: it.id,
+              kind: it.kind,
+              x: Math.round(it.x),
+              y: Math.round(it.y),
+              label: it.label,
+              r: it.r || 44,
+              tagId: it.tagId || '',
+              requiresUnlock: it.requiresUnlock || ''
+            })),
+            zones: (world.zones || []).map((z) => ({
+              id: z.id,
+              zoneKind: z.zoneKind || 'event',
+              x: Math.round(z.x),
+              y: Math.round(z.y),
+              w: Math.round(z.w),
+              h: Math.round(z.h),
+              zoneId: z.zoneId || z.tagId || '',
+              tagId: z.tagId || z.zoneId || '',
+              requiresUnlock: z.requiresUnlock || ''
+            })),
+            civilians: (world.civilians || []).map((cv) => ({
+              id: cv.id,
+              subType: cv.subType || 'cowboy',
+              x: Math.round(cv.x),
+              y: Math.round(cv.y),
+              angle: cv.angle,
+              name: cv.name,
+              npcId: cv.npcId || cv.tagId || '',
+              tagId: cv.tagId || cv.npcId || '',
+              requiresUnlock: cv.requiresUnlock || '',
+              dressTone: cv.dressTone
+            })),
             solids: world.solids.map(clonePlainSolid),
-            trees: world.trees.map((tr) => ({ x: Math.round(tr.x), y: Math.round(tr.y), r: tr.r || 20 })),
-            poles: world.poles.map((pl) => ({ x: Math.round(pl.x), y: Math.round(pl.y) })),
-            bottles: world.targets.filter((t) => t.kind === 'bottle').map((t) => ({ x: Math.round(t.x), y: Math.round(t.y) })),
+            trees: world.trees.map((tr) => ({ x: Math.round(tr.x), y: Math.round(tr.y), r: tr.r || 20, tagId: tr.tagId || '', requiresUnlock: tr.requiresUnlock || '' })),
+            poles: world.poles.map((pl) => ({ x: Math.round(pl.x), y: Math.round(pl.y), tagId: pl.tagId || '', requiresUnlock: pl.requiresUnlock || '' })),
+            bottles: world.targets.filter((t) => t.kind === 'bottle').map((t) => ({ x: Math.round(t.x), y: Math.round(t.y), tagId: t.tagId || '', requiresUnlock: t.requiresUnlock || '' })),
             bandits: world.targets.filter((t) => t.kind === 'bandit' && t.alive).map((t) => ({
               x: Math.round(t.x),
               y: Math.round(t.y),
@@ -3207,30 +4960,45 @@
               coatTrim: t.coatTrim,
               hatColor: t.hatColor,
               hatBand: t.hatBand,
-              bandana: t.bandana
+              bandana: t.bandana,
+              npcId: t.npcId || t.tagId || '',
+              tagId: t.tagId || t.npcId || '',
+              requiresUnlock: t.requiresUnlock || ''
             })),
-            horse: world.horse ? { x: Math.round(world.horse.x), y: Math.round(world.horse.y) } : null,
-            sheep: (world.sheep || []).map((sh) => ({ id: sh.id, x: Math.round(sh.x), y: Math.round(sh.y) }))
-          };
+            horse: world.horse ? { x: Math.round(world.horse.x), y: Math.round(world.horse.y), tagId: world.horse.tagId || '', requiresUnlock: world.horse.requiresUnlock || '' } : null,
+            sheep: (world.sheep || []).map((sh) => ({ id: sh.id, x: Math.round(sh.x), y: Math.round(sh.y), tagId: sh.tagId || '', requiresUnlock: sh.requiresUnlock || '' })),
+            crows: (world.crows || []).map((cr) => ({ id: cr.id, x: Math.round(cr.homeX), y: Math.round(cr.homeY), tagId: cr.tagId || '', requiresUnlock: cr.requiresUnlock || '' })),
+            snakes: (world.snakes || []).map((sn) => ({ id: sn.id, x: Math.round(sn.homeX), y: Math.round(sn.homeY), tagId: sn.tagId || '', requiresUnlock: sn.requiresUnlock || '' })),
+            oilLamps: (world.oilLamps || []).map((lm) => ({ id: lm.id, x: Math.round(lm.x), y: Math.round(lm.y), tagId: lm.tagId || '', requiresUnlock: lm.requiresUnlock || '' }))
+          });
         },
 
         exportSolidsJSON() {
           return JSON.stringify(world.exportCustomMapData(), null, 2);
         },
 
-        saveCustomMap() {
+        saveCustomMap(customName) {
           try {
-            localStorage.setItem(MAP_STORAGE_KEY, JSON.stringify(world.exportCustomMapData()));
-            return true;
+            const data = world.exportCustomMapData();
+            if (customName) {
+              data.name = String(customName).slice(0, 48);
+            }
+            if (!data.id || data.id === 'default') {
+              data.id = 'map_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 900 + 100);
+              if (!customName) data.name = 'Моя карта';
+            }
+            const saved = G.MAPS.save(data);
+            if (saved) {
+              world.mapMeta.id = saved.id;
+              world.mapMeta.name = saved.name;
+            }
+            return saved || false;
           } catch (_) {
             return false;
           }
         },
 
         resetCustomMap(state) {
-          try {
-            localStorage.removeItem(MAP_STORAGE_KEY);
-          } catch (_) {}
           if (state && state.decals) state.decals = [];
           world.trees.length = 0;
           for (let i = 0; i < defaultTreesSnapshot.length; i++) {
@@ -3242,15 +5010,20 @@
           }
           world.applyNetworkSolids(defaultSolidsSnapshot, state);
           bakeSolidSprites([], world.trees);
-          world.targets = createInitialTargets(width, height, world.solids);
+          world.targets = isBlank ? [] : createInitialTargets(width, height, world.solids);
           if (state && state.players) {
             const plist = toPlayerList(state.players);
             for (let i = 0; i < plist.length; i++) {
               if (plist[i]) plist[i].mountedHorse = false;
             }
           }
-          world.horse = makeHorse(world.solids);
-          world.sheep = createInitialSheep(world.solids);
+          world.horse = isBlank ? null : makeHorse(world.solids);
+          world.sheep = isBlank ? [] : createInitialSheep(world.solids);
+          world.crows = isBlank ? [] : createInitialCrows();
+          world.lizards = isBlank ? [] : createInitialLizards(world.solids);
+          world.snakes = isBlank ? [] : createInitialSnakes(world.solids);
+          world.oilLamps = isBlank ? [] : createInitialOilLamps();
+          world.oilPuddles = [];
         },
 
         exportSolidsList() {
@@ -3279,13 +5052,13 @@
           world.rebuildGeometry();
         },
 
-        applyNetworkProps(treesList, polesList) {
+        applyNetworkProps(treesList, polesList, extra) {
           if (Array.isArray(treesList)) {
             world.trees.length = 0;
             for (let i = 0; i < treesList.length; i++) {
               const tr = treesList[i];
               if (tr && typeof tr.x === 'number' && typeof tr.y === 'number') {
-                world.trees.push({ x: Math.round(tr.x), y: Math.round(tr.y), r: tr.r || 22 });
+                world.trees.push({ x: Math.round(tr.x), y: Math.round(tr.y), r: tr.r || 22, tagId: tr.tagId || '', requiresUnlock: tr.requiresUnlock || '' });
               }
             }
             bakeSolidSprites([], world.trees);
@@ -3295,9 +5068,34 @@
             for (let i = 0; i < polesList.length; i++) {
               const pl = polesList[i];
               if (pl && typeof pl.x === 'number' && typeof pl.y === 'number') {
-                world.poles.push({ x: Math.round(pl.x), y: Math.round(pl.y) });
+                world.poles.push({ x: Math.round(pl.x), y: Math.round(pl.y), tagId: pl.tagId || '', requiresUnlock: pl.requiresUnlock || '' });
               }
             }
+          }
+          if (extra && typeof extra === 'object') {
+            if (Array.isArray(extra.terrainTiles)) {
+              for (let i = 0; i < extra.terrainTiles.length; i++) {
+                const tl = extra.terrainTiles[i];
+                if (tl) world.paintTerrainTile(tl.tx, tl.ty, tl.type);
+              }
+            }
+            if (Array.isArray(extra.interactables)) {
+              world.interactables = extra.interactables.map((it) => ({ ...it }));
+            }
+            if (Array.isArray(extra.civilians)) {
+              world.civilians = extra.civilians.map((cv) => makeCivilian(cv.subType, cv.x, cv.y, cv));
+            }
+            if (Array.isArray(extra.zones)) {
+              world.zones = extra.zones.map((zn) => makeZone(zn.zoneKind, zn.x, zn.y, zn.w, zn.h, zn));
+            }
+            if (Array.isArray(extra.doors)) {
+              world.doors.length = 0;
+              for (let i = 0; i < extra.doors.length; i++) {
+                const dr = extra.doors[i];
+                world.doors.push({ ...dr, angle: 0, vel: 0 });
+              }
+            }
+            if (extra.playerSpawn) world.setEditorPlayerSpawn(extra.playerSpawn.x, extra.playerSpawn.y);
           }
         },
 
@@ -3561,6 +5359,26 @@
 
         // Рандомная точка появления бота: внутри игровых зон и коридоров каньона, без пересечения со скалами
         pickSpawnPoint(player, nearX, nearY) {
+          if (isBlank) {
+            const playersList = toPlayerList(player);
+            for (let attempt = 0; attempt < 42; attempt++) {
+              const x = (nearX !== undefined)
+                ? G.MATH.clamp(nearX + G.MATH.rand(-180, 180), 48, width - 48)
+                : G.MATH.rand(48, width - 48);
+              const y = (nearY !== undefined)
+                ? G.MATH.clamp(nearY + G.MATH.rand(-160, 160), 48, height - 48)
+                : G.MATH.rand(48, height - 48);
+              let tooClose = false;
+              for (let pi = 0; pi < playersList.length; pi++) {
+                const pl = playersList[pi];
+                if (!pl.dead && G.MATH.dist(x, y, pl.x, pl.y) < 200) { tooClose = true; break; }
+              }
+              if (tooClose) continue;
+              if (!isFreeSpot(x, y, 18, world.solids)) continue;
+              return { x: Math.round(x), y: Math.round(y) };
+            }
+            return { x: Math.round(width * 0.5), y: Math.round(height * 0.5) };
+          }
           const dx = LAYOUT.canyonDx;
           const yd = LAYOUT.yardRect;
           const zones = [
@@ -3700,10 +5518,10 @@
               const rad = curMin + Math.random() * Math.max(10, curMax - curMin);
               const x = anchor.x + Math.cos(ang) * rad;
               const y = anchor.y + Math.sin(ang) * rad;
-              if (x < 64 || x > width - 84 || y < 86 || y > height - 86) continue;
+              if (x < 48 || x > width - 64 || y < 56 || y > height - 56) continue;
               if (world.getIndoorZoneAt && world.getIndoorZoneAt(x, y)) continue;
-              // Дополнительный отступ от стен салуна (внутри indoorZones)
-              if (x >= SALOON.x - 8 && x <= SALOON.x + SALOON.w + 8 && y >= SALOON.y - 8 && y <= SALOON.y + SALOON.h + 8) continue;
+              // Дополнительный отступ от стен салуна (только на стандартной карте)
+              if (!isBlank && x >= SALOON.x - 8 && x <= SALOON.x + SALOON.w + 8 && y >= SALOON.y - 8 && y <= SALOON.y + SALOON.h + 8) continue;
 
               let tooClose = false;
               for (let pi = 0; pi < alivePlayers.length; pi++) {
@@ -3841,6 +5659,12 @@
         },
 
         getZoneAt(x, y) {
+          if (isBlank) {
+            if (baseTerrain === 'canyon') return { id: 'canyon', label: 'КАНЬОН' };
+            if (baseTerrain === 'grass') return { id: 'grass', label: 'СТЕПЬ' };
+            if (baseTerrain === 'wood') return { id: 'wood', label: 'ПОМЕЩЕНИЕ' };
+            return { id: 'wasteland', label: 'ПУСТОШЬ' };
+          }
           if (x < SALOON.x + SALOON.w && y > SALOON.y && y < SALOON.y + SALOON.h) {
             return { id: 'saloon', label: 'САЛУН' };
           }
@@ -3855,6 +5679,21 @@
         },
 
         getSurfaceAt(x, y) {
+          if (world.terrainTileGrid && world.tileCols > 0) {
+            const tx = Math.floor(x / 32);
+            const ty = Math.floor(y / 32);
+            if (tx >= 0 && tx < world.tileCols && ty >= 0 && ty < world.tileRows) {
+              const tl = world.terrainTileGrid[ty * world.tileCols + tx];
+              if (tl && tl.type) {
+                if (tl.type === 'wood_floor' || tl.type === 'boardwalk') return 'wood';
+                if (tl.type === 'water') return 'water';
+                return 'dirt';
+              }
+            }
+          }
+          if (isBlank) {
+            return baseTerrain === 'wood' ? 'wood' : 'dirt';
+          }
           if (x < SALOON.x + SALOON.w + 4 && y > SALOON.y + 2 && y < SALOON.y + SALOON.h - 2) return 'wood';
           if (x >= STREET_START_X && x <= STREET_END_X + 5 && ((y >= STREET_TOP && y <= STREET_TOP + 22) || (y >= STREET_BOT && y <= STREET_BOT + 22))) {
             return 'wood';
@@ -3984,7 +5823,8 @@
               const spd = Math.hypot(pl.vx || 0, pl.vy || 0);
               const isFast = !!(pl.rolling || spd > 130 || (pl.mountedHorse && spd > 105));
               if (dist < (isFast ? 26 : 22)) {
-                const pushDir = (pl.vx || 0) >= 0 ? (i === 0 ? -1 : 1) : (i === 0 ? 1 : -1);
+                const torque = Math.cos(d.baseAngle) * (pl.vy || 0) - Math.sin(d.baseAngle) * (pl.vx || 0);
+                const pushDir = torque >= 0 ? 1 : -1;
                 if (isFast && (d.slamCooldown || 0) <= 0) {
                   d.slamCooldown = 0.42;
                   d.slamOwnerId = pl.id || 'local';
@@ -4016,7 +5856,8 @@
             }
 
             if (horsePushing && (d.slamCooldown || 0) <= 0 && G.MATH.dist(hr.x, hr.y, midX, midY) < 28) {
-              const pushDir = (hr.vx || 0) >= 0 ? (i === 0 ? -1 : 1) : (i === 0 ? 1 : -1);
+              const hTorque = Math.cos(d.baseAngle) * (hr.vy || 0) - Math.sin(d.baseAngle) * (hr.vx || 0);
+              const pushDir = hTorque >= 0 ? 1 : -1;
               d.slamCooldown = 0.42;
               d.slamOwnerId = null;
               d.vel += pushDir * 30;
@@ -4216,7 +6057,11 @@
             }
             let bumped = false;
             for (let sIdx = 0; sIdx < world.solids.length; sIdx++) {
-              const res = G.MATH.circleRectPush(sh.x, sh.y, sh.r, world.solids[sIdx]);
+              const s = world.solids[sIdx];
+              if (s.walkThrough || s._storyHidden) continue;
+              if (sh.x < s.x - 220 || sh.x > s.x + s.w + 220 || sh.y < s.y - 220 || sh.y > s.y + s.h + 220) continue;
+              const rad = s.type === 'fence' ? sh.r + 2 : sh.r;
+              const res = G.MATH.circleRectPush(sh.x, sh.y, rad, s);
               if (res.hit) {
                 sh.x = res.x;
                 sh.y = res.y;
@@ -4229,10 +6074,606 @@
           }
         },
 
+        crowCawCooldown: 11.0,
+
+        scareCrowsNear(sx, sy, radius, state) {
+          if (!world.crows || !world.crows.length) return false;
+          const rad = radius || 320;
+          let flushed = false;
+          const lp = state ? (state.player || null) : null;
+          for (let i = 0; i < world.crows.length; i++) {
+            const cr = world.crows[i];
+            if (!cr || (cr.state !== 'perched' && cr.state !== 'fly_to_corpse')) continue;
+            if (G.MATH.dist(cr.x, cr.y, sx, sy) <= rad) {
+              cr.state = 'flying';
+              cr.respawnTimer = G.MATH.rand(35, 50);
+              cr.corpseId = null;
+              const awayAng = Math.atan2(cr.y - sy, cr.x - sx) + G.MATH.rand(-0.55, 0.55);
+              const spd = G.MATH.rand(130, 175);
+              cr.vx = Math.cos(awayAng) * spd;
+              cr.vy = Math.sin(awayAng) * spd;
+              cr.vz = G.MATH.rand(30, 44);
+              cr.angle = awayAng;
+              flushed = true;
+            }
+          }
+          if (flushed) {
+            if (G.AUDIO && G.AUDIO.playBirdsFlush) G.AUDIO.playBirdsFlush();
+            if (G.AUDIO && G.AUDIO.playCrowCaw) {
+              G.AUDIO.playCrowCaw(sx, sy, lp ? lp.x : sx, lp ? lp.y : sy);
+            }
+            if (state && state.netRole === 'host' && state.netEvents && state.netEvents.length < 64) {
+              state.netEvents.push({ kind: 'birds', x: Math.round(sx), y: Math.round(sy), r: rad });
+              state.netEvents.push({ kind: 'crow_caw', x: Math.round(sx), y: Math.round(sy) });
+            }
+          }
+          return flushed;
+        },
+
+        updateCrows(dt, player, state) {
+          const list = world.crows;
+          if (!list || !list.length) return;
+          const playersList = toPlayerList(player);
+          const lp = (state && state.player) || playersList[0] || null;
+          const hr = world.horse;
+
+          world.crowCawCooldown = Math.max(0, (world.crowCawCooldown || 0) - dt);
+          let cawCandidate = null;
+
+          for (let i = 0; i < list.length; i++) {
+            const cr = list[i];
+            if (!cr) continue;
+
+            if (cr.state === 'perched') {
+              cr.hopTimer -= dt;
+              if (cr.hopTimer <= 0) {
+                cr.hopTimer = G.MATH.rand(1.4, 4.2);
+                const bx = cr.corpseId ? cr.corpseSpotX : cr.homeX;
+                const by = cr.corpseId ? cr.corpseSpotY : cr.homeY;
+                cr.x = G.MATH.clamp(bx + G.MATH.rand(-4, 4), 24, world.width - 24);
+                cr.y = G.MATH.clamp(by + G.MATH.rand(-3, 3), 24, world.height - 24);
+                cr.angle += G.MATH.rand(-0.8, 0.8);
+              }
+
+              // Если рядом есть мёртвый бандит, свободная ворона может перелететь к телу
+              if (!cr.corpseId && Math.random() < dt * 0.25) {
+                for (let ti = 0; ti < world.targets.length; ti++) {
+                  const t = world.targets[ti];
+                  if (t.kind !== 'bandit' || t.alive) continue;
+                  if (G.MATH.dist(cr.x, cr.y, t.x, t.y) > 340) continue;
+                  let countAtCorpse = 0;
+                  for (let j = 0; j < list.length; j++) {
+                    if (list[j] && list[j].corpseId === t.id) countAtCorpse++;
+                  }
+                  if (countAtCorpse < 2) {
+                    cr.state = 'fly_to_corpse';
+                    cr.corpseId = t.id;
+                    const a = Math.random() * Math.PI * 2;
+                    cr.corpseSpotX = Math.round(t.x + Math.cos(a) * G.MATH.rand(10, 18));
+                    cr.corpseSpotY = Math.round(t.y + Math.sin(a) * G.MATH.rand(10, 18));
+                    cr.z = 2;
+                    break;
+                  }
+                }
+              }
+
+              // Реакция на приближение игрока или лошади (< 65 px)
+              let threat = null;
+              for (let pi = 0; pi < playersList.length; pi++) {
+                const pl = playersList[pi];
+                if (pl && !pl.dead && G.MATH.dist(cr.x, cr.y, pl.x, pl.y) < 65) {
+                  threat = pl;
+                  break;
+                }
+              }
+              if (!threat && hr && hr.state !== 'dead' && G.MATH.dist(cr.x, cr.y, hr.x, hr.y) < 65) {
+                threat = hr;
+              }
+              if (threat) {
+                world.scareCrowsNear(threat.x, threat.y, 110, state);
+                continue;
+              }
+
+              if (!cawCandidate && lp && G.MATH.dist(cr.x, cr.y, lp.x, lp.y) < 560) {
+                cawCandidate = cr;
+              }
+            } else if (cr.state === 'fly_to_corpse') {
+              const dx = cr.corpseSpotX - cr.x;
+              const dy = cr.corpseSpotY - cr.y;
+              const d = Math.hypot(dx, dy);
+              cr.wingPhase += cr.flapSpeed * dt;
+              if (d <= 6) {
+                cr.x = cr.corpseSpotX;
+                cr.y = cr.corpseSpotY;
+                cr.z = 0;
+                cr.state = 'perched';
+              } else {
+                const spd = 92;
+                cr.x += (dx / d) * spd * dt;
+                cr.y += (dy / d) * spd * dt;
+                cr.z = Math.min(22, d * 0.16);
+                cr.angle = Math.atan2(dy, dx);
+              }
+            } else {
+              cr.respawnTimer -= dt;
+              if (cr.state === 'flying') {
+                cr.x += cr.vx * dt;
+                cr.y += cr.vy * dt;
+                cr.z = Math.min(96, cr.z + cr.vz * dt);
+                cr.vz = Math.max(4, cr.vz - dt * 10);
+                cr.wingPhase += cr.flapSpeed * dt;
+                if (cr.x < -70 || cr.x > world.width + 70 || cr.y < -70 || cr.y > world.height + 70) {
+                  cr.state = 'gone';
+                }
+              }
+              if (cr.respawnTimer <= 0) {
+                cr.state = 'perched';
+                cr.x = cr.homeX;
+                cr.y = cr.homeY;
+                cr.z = 0;
+                cr.vx = 0;
+                cr.vy = 0;
+                cr.vz = 0;
+                cr.corpseId = null;
+                cr.hopTimer = G.MATH.rand(1.0, 3.5);
+              }
+            }
+          }
+
+          if (world.crowCawCooldown <= 0 && cawCandidate) {
+            world.crowCawCooldown = G.MATH.rand(10, 22);
+            if (G.AUDIO && G.AUDIO.playCrowCaw) {
+              G.AUDIO.playCrowCaw(cawCandidate.x, cawCandidate.y, lp.x, lp.y);
+            }
+            if (state && state.netRole === 'host' && state.netEvents && state.netEvents.length < 64) {
+              state.netEvents.push({ kind: 'crow_caw', x: Math.round(cawCandidate.x), y: Math.round(cawCandidate.y) });
+            }
+          }
+        },
+
+        updateLizards(dt, player) {
+          const list = world.lizards;
+          if (!list || !list.length) return;
+          const playersList = toPlayerList(player);
+          const hr = world.horse;
+
+          for (let i = 0; i < list.length; i++) {
+            const lz = list[i];
+            if (!lz) continue;
+            lz.stateTimer -= dt;
+
+            let threat = null;
+            let bestD = 70;
+            for (let pi = 0; pi < playersList.length; pi++) {
+              const pl = playersList[pi];
+              if (!pl || pl.dead) continue;
+              const d = G.MATH.dist(lz.x, lz.y, pl.x, pl.y);
+              if (d < bestD) { bestD = d; threat = pl; }
+            }
+            if (hr && hr.state !== 'dead') {
+              const dh = G.MATH.dist(lz.x, lz.y, hr.x, hr.y);
+              if (dh < bestD) { bestD = dh; threat = hr; }
+            }
+            if (!threat) {
+              for (let ti = 0; ti < world.targets.length; ti++) {
+                const t = world.targets[ti];
+                if (t.kind !== 'bandit' || !t.alive) continue;
+                const d = G.MATH.dist(lz.x, lz.y, t.x, t.y);
+                if (d < bestD) { bestD = d; threat = t; }
+              }
+            }
+
+            if (threat && lz.state !== 'flee') {
+              lz.state = 'flee';
+              lz.stateTimer = G.MATH.rand(0.9, 1.5);
+              // Ищем ближайший камень/укрытие поодаль от угрозы
+              let goalX = lz.x + (lz.x - threat.x) * 1.4;
+              let goalY = lz.y + (lz.y - threat.y) * 1.4;
+              let bestRock = 150;
+              for (let si = 0; si < world.solids.length; si++) {
+                const s = world.solids[si];
+                if (s.type !== 'boulder' && s.type !== 'cliff' && s.type !== 'low_wall') continue;
+                if (lz.x < s.x - 220 || lz.x > s.x + s.w + 220 || lz.y < s.y - 220 || lz.y > s.y + s.h + 220) continue;
+                const cx = s.x + s.w * 0.5, cy = s.y + s.h * 0.5;
+                const d = G.MATH.dist(lz.x, lz.y, cx, cy);
+                if (d < bestRock && G.MATH.dist(threat.x, threat.y, cx, cy) > d * 0.7) {
+                  bestRock = d;
+                  goalX = cx;
+                  goalY = cy;
+                }
+              }
+              lz.targetX = G.MATH.clamp(goalX, 36, world.width - 36);
+              lz.targetY = G.MATH.clamp(goalY, 36, world.height - 36);
+            }
+
+            if (lz.state === 'flee' || lz.state === 'scurry') {
+              const dx = lz.targetX - lz.x;
+              const dy = lz.targetY - lz.y;
+              const d = Math.hypot(dx, dy);
+              const spd = lz.state === 'flee' ? 128 : 48;
+              if (d > 4 && lz.stateTimer > 0) {
+                lz.vx = (dx / d) * spd;
+                lz.vy = (dy / d) * spd;
+                lz.x += lz.vx * dt;
+                lz.y += lz.vy * dt;
+                lz.angle = Math.atan2(dy, dx);
+                lz.tailPhase += dt * (lz.state === 'flee' ? 28 : 14);
+              } else {
+                lz.vx = 0;
+                lz.vy = 0;
+                lz.state = 'idle';
+                lz.stateTimer = G.MATH.rand(2.0, 5.2);
+              }
+            } else if (lz.stateTimer <= 0) {
+              lz.state = 'scurry';
+              lz.stateTimer = G.MATH.rand(0.5, 1.1);
+              lz.targetX = G.MATH.clamp(lz.homeX + G.MATH.rand(-45, 45), 36, world.width - 36);
+              lz.targetY = G.MATH.clamp(lz.homeY + G.MATH.rand(-45, 45), 36, world.height - 36);
+            }
+          }
+        },
+
+        updateSnakes(dt, player, state) {
+          const list = world.snakes;
+          if (!list || !list.length) return;
+          const playersList = toPlayerList(player);
+          const lp = (state && state.player) || playersList[0] || null;
+          const hr = world.horse;
+          const P = getPal();
+
+          for (let i = 0; i < list.length; i++) {
+            const sn = list[i];
+            if (!sn || !sn.alive) continue;
+            if (sn.hitFlash > 0) sn.hitFlash = Math.max(0, sn.hitFlash - dt);
+            if (sn.rattleCd > 0) sn.rattleCd = Math.max(0, sn.rattleCd - dt);
+            if (sn.biteCd > 0) sn.biteCd = Math.max(0, sn.biteCd - dt);
+            sn.stateTimer -= dt;
+
+            // Реакция лошади (резкий увод курса на 35-50 deg без паники и потери calm)
+            if (hr && hr.state !== 'dead' && (hr.swerveCd || 0) <= 0) {
+              const dh = G.MATH.dist(sn.x, sn.y, hr.x, hr.y);
+              if (dh < 54 && (hr.speed > 18 || hr.state === 'ridden' || hr.state === 'stampede')) {
+                const awayX = hr.x - sn.x;
+                const awayY = hr.y - sn.y;
+                const curAng = hr.angle || 0;
+                const cross = Math.cos(curAng) * awayY - Math.sin(curAng) * awayX;
+                const side = cross >= 0 ? 1 : -1;
+                const swerveDeg = G.MATH.rand(36, 48) * (Math.PI / 180) * side;
+                const newAng = G.MATH.normAngle(curAng + swerveDeg);
+                const spd = Math.max(95, hr.speed || 0);
+                hr.angle = newAng;
+                hr.vx = Math.cos(newAng) * spd;
+                hr.vy = Math.sin(newAng) * spd;
+                hr.swerveTimer = 0.35;
+                hr.swerveCd = 1.4;
+                hr.swerveAngle = newAng;
+                if (G.AUDIO && G.AUDIO.playHoofbeat) G.AUDIO.playHoofbeat(world.getSurfaceAt(hr.x, hr.y));
+              }
+            }
+
+            // Поиск ближайшего пешего (не на коне)
+            let nearPed = null;
+            let nearDist = 85;
+            for (let pi = 0; pi < playersList.length; pi++) {
+              const pl = playersList[pi];
+              if (!pl || pl.dead || pl.mountedHorse) continue;
+              const d = G.MATH.dist(sn.x, sn.y, pl.x, pl.y);
+              if (d < nearDist) { nearDist = d; nearPed = pl; }
+            }
+            for (let ti = 0; ti < world.targets.length; ti++) {
+              const t = world.targets[ti];
+              if (t.kind !== 'bandit' || !t.alive) continue;
+              const d = G.MATH.dist(sn.x, sn.y, t.x, t.y);
+              if (d < nearDist) { nearDist = d; nearPed = t; }
+            }
+
+            if (nearPed && nearDist <= 85) {
+              sn.state = 'coil';
+              sn.angle = Math.atan2(nearPed.y - sn.y, nearPed.x - sn.x);
+              sn.phase += dt * 10;
+              if (nearDist >= 26 && sn.rattleCd <= 0) {
+                sn.rattleCd = 1.25;
+                if (G.AUDIO && G.AUDIO.playSnakeRattle) {
+                  G.AUDIO.playSnakeRattle(sn.x, sn.y, lp ? lp.x : sn.x, lp ? lp.y : sn.y);
+                }
+                if (state && state.netRole === 'host' && state.netEvents && state.netEvents.length < 64) {
+                  state.netEvents.push({ kind: 'snake_rattle', x: Math.round(sn.x), y: Math.round(sn.y) });
+                }
+              }
+              // Укус при < 26 px: 0 урона, только замедление на 1.6 сек
+              if (nearDist < 26 && sn.biteCd <= 0) {
+                sn.biteCd = 2.5;
+                nearPed.snakeSlowTimer = 1.6;
+                if (state && state.floatTexts) {
+                  if (state.floatTexts.length > 24) state.floatTexts.shift();
+                  state.floatTexts.push({
+                    x: nearPed.x, y: nearPed.y - 12, vy: -24,
+                    text: 'УКУС! ЗАМЕДЛЕН', color: P.grass[0], big: true, life: 1.0, maxLife: 1.0
+                  });
+                }
+                if (G.AUDIO && G.AUDIO.playSnakeRattle) {
+                  G.AUDIO.playSnakeRattle(sn.x, sn.y, lp ? lp.x : sn.x, lp ? lp.y : sn.y);
+                }
+              }
+            } else {
+              if (sn.state === 'coil') {
+                sn.state = 'idle';
+                sn.stateTimer = G.MATH.rand(1.2, 2.8);
+              }
+              if (sn.state === 'slither') {
+                const dx = sn.targetX - sn.x;
+                const dy = sn.targetY - sn.y;
+                const d = Math.hypot(dx, dy);
+                if (d > 5 && sn.stateTimer > 0) {
+                  sn.x += (dx / d) * 24 * dt;
+                  sn.y += (dy / d) * 24 * dt;
+                  sn.angle = Math.atan2(dy, dx);
+                  sn.phase += dt * 7;
+                } else {
+                  sn.state = 'idle';
+                  sn.stateTimer = G.MATH.rand(2.0, 4.5);
+                }
+              } else if (sn.stateTimer <= 0) {
+                sn.state = 'slither';
+                sn.stateTimer = G.MATH.rand(1.4, 2.8);
+                sn.targetX = G.MATH.clamp(sn.homeX + G.MATH.rand(-38, 38), 36, world.width - 36);
+                sn.targetY = G.MATH.clamp(sn.homeY + G.MATH.rand(-34, 34), 36, world.height - 34);
+              }
+            }
+          }
+        },
+
+        breakOilLamp(lamp, hitX, hitY, state) {
+          if (!lamp || !lamp.alive) return null;
+          lamp.alive = false;
+          const P = getPal();
+          if (G.AUDIO && G.AUDIO.playImpact) G.AUDIO.playImpact('glass');
+          if (state) {
+            if (state.netRole === 'host' && state.netEvents && state.netEvents.length < 64) {
+              state.netEvents.push({ kind: 'impact', mat: 'glass', x: Math.round(lamp.x), y: Math.round(lamp.y) });
+            }
+            if (state.particles) {
+              for (let k = 0; k < 10; k++) {
+                if (state.particles.length > 340) state.particles.shift();
+                const a = Math.random() * Math.PI * 2;
+                const sp = G.MATH.rand(35, 115);
+                state.particles.push({
+                  x: lamp.x, y: lamp.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+                  life: G.MATH.rand(0.25, 0.48), maxLife: 0.48, size: G.MATH.rand(1.4, 2.4),
+                  drag: 4.5, color: k % 3 === 0 ? P.brass[0] : P.glass[1], alpha: 0.92, kind: 'debris'
+                });
+              }
+            }
+          }
+          if (!world.oilPuddles) world.oilPuddles = [];
+          const targetR = Math.round(G.MATH.rand(42, 52));
+          const pd = {
+            id: 'oil_' + lamp.id + '_' + Date.now().toString(36),
+            x: Math.round(hitX !== undefined ? (lamp.x * 0.7 + hitX * 0.3) : lamp.x),
+            y: Math.round(hitY !== undefined ? (lamp.y * 0.7 + hitY * 0.3) : lamp.y),
+            r: 6,
+            targetR: targetR,
+            alpha: 1.0,
+            burning: false,
+            burnTimer: 0,
+            maxBurn: 9.0,
+            crackleCd: 0,
+            smokeCd: 0,
+            wetExtinguished: false
+          };
+          world.oilPuddles.push(pd);
+          return pd;
+        },
+
+        igniteOilPuddlesNear(x, y, radius, state) {
+          const list = world.oilPuddles;
+          if (!list || !list.length) return false;
+          const lp = state ? (state.player || null) : null;
+          let ignitedAny = false;
+          for (let i = 0; i < list.length; i++) {
+            const pd = list[i];
+            if (!pd || pd.burning || pd.wetExtinguished) continue;
+            if (world.isPointWet(pd.x, pd.y)) continue;
+            if (G.MATH.dist(x, y, pd.x, pd.y) <= (radius || 38) + pd.r) {
+              pd.burning = true;
+              pd.burnTimer = pd.maxBurn || 9.0;
+              pd.crackleCd = 0.25;
+              ignitedAny = true;
+            }
+          }
+          if (ignitedAny) {
+            if (G.AUDIO && G.AUDIO.playFireIgnite) {
+              G.AUDIO.playFireIgnite(x, y, lp ? lp.x : x, lp ? lp.y : y);
+            }
+            if (state && state.netRole === 'host' && state.netEvents && state.netEvents.length < 64) {
+              state.netEvents.push({ kind: 'fire_ignite', x: Math.round(x), y: Math.round(y) });
+            }
+          }
+          return ignitedAny;
+        },
+
+        updateOilPuddles(dt, player, state) {
+          const list = world.oilPuddles;
+          if (!list || !list.length) return;
+          const P = getPal();
+          const playersList = toPlayerList(player);
+          const lp = (state && state.player) || playersList[0] || null;
+          const hr = world.horse;
+
+          for (let i = list.length - 1; i >= 0; i--) {
+            const pd = list[i];
+            if (!pd) continue;
+            // Плавное быстрое разливание масляного пятна до targetR (~0.6 сек)
+            if (pd.targetR && pd.r < pd.targetR) {
+              pd.r = Math.min(pd.targetR, pd.r + Math.max(22, (pd.targetR - pd.r) * 7.5) * dt);
+            }
+            if (!pd.burning) continue;
+
+            // Вода из пробитой бочки/корыта тушит пожар с паром
+            if (world.isPointWet(pd.x, pd.y)) {
+              pd.burning = false;
+              pd.burnTimer = 0;
+              pd.wetExtinguished = true;
+              if (G.AUDIO && G.AUDIO.playImpact) G.AUDIO.playImpact('water');
+              if (state && state.particles) {
+                for (let k = 0; k < 12; k++) {
+                  if (state.particles.length > 340) state.particles.shift();
+                  const a = Math.random() * Math.PI * 2;
+                  const sp = G.MATH.rand(12, 42);
+                  state.particles.push({
+                    x: pd.x + G.MATH.rand(-pd.r * 0.4, pd.r * 0.4),
+                    y: pd.y + G.MATH.rand(-pd.r * 0.4, pd.r * 0.4),
+                    vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 18,
+                    life: G.MATH.rand(0.45, 0.85), maxLife: 0.85, size: G.MATH.rand(2.5, 4.5),
+                    grow: 4, drag: 2.5, color: P.cloud[0], alpha: 0.65, kind: 'smoke'
+                  });
+                }
+              }
+              continue;
+            }
+
+            pd.burnTimer -= dt;
+            pd.crackleCd = (pd.crackleCd || 0) - dt;
+            if (pd.crackleCd <= 0) {
+              pd.crackleCd = G.MATH.rand(0.45, 0.85);
+              if (lp && G.AUDIO && G.AUDIO.playFireCrackle) {
+                G.AUDIO.playFireCrackle(pd.x, pd.y, lp.x, lp.y);
+              }
+            }
+
+            pd.smokeCd = (pd.smokeCd || 0) - dt;
+            if (pd.smokeCd <= 0 && state && state.particles) {
+              pd.smokeCd = 0.09;
+              if (state.particles.length > 340) state.particles.shift();
+              state.particles.push({
+                x: pd.x + G.MATH.rand(-pd.r * 0.55, pd.r * 0.55),
+                y: pd.y + G.MATH.rand(-pd.r * 0.55, pd.r * 0.55),
+                vx: G.MATH.rand(-10, 10), vy: G.MATH.rand(-26, -12),
+                life: G.MATH.rand(0.5, 0.9), maxLife: 0.9, size: G.MATH.rand(2.0, 3.8),
+                grow: 3.5, drag: 1.5, color: Math.random() < 0.5 ? P.stone[1] : P.stone[2], alpha: 0.48, kind: 'smoke'
+              });
+            }
+
+            // Строго локальное зажигание только физически перекрывающихся соседних луж масла
+            for (let j = 0; j < list.length; j++) {
+              if (i === j) continue;
+              const other = list[j];
+              if (other && !other.burning && !other.wetExtinguished && !world.isPointWet(other.x, other.y)) {
+                if (G.MATH.dist(pd.x, pd.y, other.x, other.y) < pd.r + other.r - 4) {
+                  other.burning = true;
+                  other.burnTimer = other.maxBurn || 9.0;
+                }
+              }
+            }
+
+            // Горение деревянных разрушаемых предметов (!s.locked)
+            for (let si = world.solids.length - 1; si >= 0; si--) {
+              const s = world.solids[si];
+              if (!s || s.locked) continue;
+              const isBurnableWood = (s.type === 'crate' || s.type === 'fence' || s.type === 'hay' || s.type === 'table' || s.type === 'hitching_post');
+              if (!isBurnableWood) continue;
+              const nx = G.MATH.clamp(pd.x, s.x, s.x + s.w);
+              const ny = G.MATH.clamp(pd.y, s.y, s.y + s.h);
+              if (G.MATH.dist(pd.x, pd.y, nx, ny) <= pd.r + 2) {
+                if (s.burnHp === undefined) { s.burnHp = 105; s.maxBurnHp = 105; }
+                s.burnHp -= 35 * dt;
+                s.charred = G.MATH.clamp(1 - s.burnHp / (s.maxBurnHp || 105), 0, 1);
+                if (s.burnHp <= 0) {
+                  const ex = Math.round(s.x + s.w * 0.5);
+                  const ey = Math.round(s.y + s.h * 0.5);
+                  if (world.removeSolidById(s.id, state) && state && state.particles) {
+                    for (let pk = 0; pk < 10; pk++) {
+                      if (state.particles.length > 340) state.particles.shift();
+                      const ang = Math.random() * Math.PI * 2;
+                      const sp = G.MATH.rand(24, 95);
+                      state.particles.push({
+                        x: ex + G.MATH.rand(-8, 8), y: ey + G.MATH.rand(-8, 8),
+                        vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 16,
+                        life: G.MATH.rand(0.25, 0.55), maxLife: 0.55, size: G.MATH.rand(1.6, 3.0),
+                        drag: 3.0, color: pk % 2 === 0 ? P.brass[0] : P.stone[1], alpha: 0.85, kind: pk % 2 === 0 ? 'spark' : 'smoke'
+                      });
+                    }
+                  }
+                }
+              }
+            }
+
+            // Урон от огня персонажам (18 HP/сек)
+            for (let pi = 0; pi < playersList.length; pi++) {
+              const pl = playersList[pi];
+              if (!pl || pl.dead) continue;
+              if (G.CFG.godMode && state && pl.id === state.localPlayerId) continue;
+              if (G.MATH.dist(pl.x, pl.y, pd.x, pd.y) <= pd.r + G.CFG.playerRadius * 0.5) {
+                pl.hp = Math.max(0, (pl.hp !== undefined ? pl.hp : 100) - 18 * dt);
+                pl.hurtTimer = Math.max(pl.hurtTimer || 0, 0.12);
+                pl.fireDmgCd = (pl.fireDmgCd || 0) - dt;
+                if (pl.fireDmgCd <= 0) {
+                  pl.fireDmgCd = 0.45;
+                  if (state && state.floatTexts) {
+                    state.floatTexts.push({ x: pl.x, y: pl.y - 10, vy: -20, text: 'ОГОНЬ!', color: P.barnRed[0], life: 0.65, maxLife: 0.65 });
+                  }
+                }
+              }
+            }
+            for (let ti = 0; ti < world.targets.length; ti++) {
+              const t = world.targets[ti];
+              if (t.kind !== 'bandit' || !t.alive) continue;
+              if (G.MATH.dist(t.x, t.y, pd.x, pd.y) <= pd.r + (t.r || 11) * 0.5) {
+                t.hp -= 18 * dt;
+                t.hurtTimer = Math.max(t.hurtTimer || 0, 0.12);
+                if (t.hp <= 0) {
+                  t.alive = false;
+                  t.deathAnim = 0;
+                  t.bloodPool = 0;
+                }
+              }
+            }
+            if (hr && hr.state !== 'dead' && G.MATH.dist(hr.x, hr.y, pd.x, pd.y) <= pd.r + (hr.r || 15) * 0.5) {
+              hr.hp = Math.max(0, (hr.hp || 150) - 18 * dt);
+              hr.calm = Math.max(0, (hr.calm || 100) - 24 * dt);
+              hr.calmRegenDelay = 2.0;
+              if (hr.hp <= 0) {
+                hr.state = 'dead';
+                hr.tied = false;
+                hr.vx = 0;
+                hr.vy = 0;
+                hr.speed = 0;
+              }
+            }
+            if (world.sheep) {
+              for (let si = 0; si < world.sheep.length; si++) {
+                const sh = world.sheep[si];
+                if (!sh || !sh.alive) continue;
+                if (G.MATH.dist(sh.x, sh.y, pd.x, pd.y) <= pd.r + (sh.r || 10) * 0.5) {
+                  sh.hp -= 18 * dt;
+                  sh.state = 'flee';
+                  sh.stateTimer = 2.2;
+                  sh.fleeAngle = Math.atan2(sh.y - pd.y, sh.x - pd.x);
+                  if (sh.hp <= 0) {
+                    sh.alive = false;
+                    sh.vx = 0;
+                    sh.vy = 0;
+                  }
+                }
+              }
+            }
+
+            pd.alpha = pd.burnTimer < 1.0 ? G.MATH.clamp(pd.burnTimer, 0, 1) : 1.0;
+            if (pd.burnTimer <= 0) {
+              pd.burning = false;
+              list.splice(i, 1);
+            }
+          }
+        },
+
         updateTargets(dt, player, state) {
           world.updateWaterBarrelsAndPuddles(dt);
           world.updateBirds(dt);
           world.updateSheep(dt, state);
+          world.updateCrows(dt, player, state);
+          world.updateLizards(dt, player);
+          world.updateSnakes(dt, player, state);
+          world.updateOilPuddles(dt, player, state);
           for (let i = 0; i < world.targets.length; i++) {
             const t = world.targets[i];
             if (t.hitFlash > 0) t.hitFlash = Math.max(0, t.hitFlash - dt);
@@ -4242,20 +6683,29 @@
               if (t.hurtTimer > 0) t.hurtTimer = Math.max(0, t.hurtTimer - dt);
               if (t.doorHitCd > 0) t.doorHitCd = Math.max(0, t.doorHitCd - dt);
               if (t.stunTimer > 0) t.stunTimer = Math.max(0, t.stunTimer - dt);
+              if (t.snakeSlowTimer > 0) t.snakeSlowTimer = Math.max(0, t.snakeSlowTimer - dt);
 
               if (Math.hypot(t.knockVx, t.knockVy) > 1) {
-                t.x += t.knockVx * dt;
-                t.y += t.knockVy * dt;
+                const kx = t.knockVx * dt;
+                const ky = t.knockVy * dt;
+                const kDist = Math.hypot(kx, ky);
+                const kSteps = kDist > 5 ? Math.max(2, Math.ceil(kDist / 4)) : 1;
+                for (let ks = 0; ks < kSteps; ks++) {
+                  t.x += kx / kSteps;
+                  t.y += ky / kSteps;
+                  for (let j = 0; j < world.solids.length; j++) {
+                    const ksSolid = world.solids[j];
+                    if (ksSolid.walkThrough || ksSolid._storyHidden) continue;
+                    const res = G.MATH.circleRectPush(t.x, t.y, t.r, ksSolid);
+                    if (res.hit) {
+                      t.x = res.x;
+                      t.y = res.y;
+                    }
+                  }
+                }
                 const damp = Math.exp(-10 * dt);
                 t.knockVx *= damp;
                 t.knockVy *= damp;
-                for (let j = 0; j < world.solids.length; j++) {
-                  const res = G.MATH.circleRectPush(t.x, t.y, t.r, world.solids[j]);
-                  if (res.hit) {
-                    t.x = res.x;
-                    t.y = res.y;
-                  }
-                }
               }
 
               if (t.alive) {
@@ -4473,16 +6923,43 @@
                   }
                 }
 
-                // Выталкивание из твёрдых препятствий и границ карты
+                // Замедление от укуса змеи (0.55x)
+                if ((t.snakeSlowTimer || 0) > 0) {
+                  t.x = prevX + (t.x - prevX) * 0.55;
+                  t.y = prevY + (t.y - prevY) * 0.55;
+                }
+                // Выталкивание из твёрдых препятствий и границ карты (с подшагами от тонких заборов)
+                const bStepDist = Math.hypot(t.x - prevX, t.y - prevY);
+                if (bStepDist > 5) {
+                  const endX = t.x, endY = t.y;
+                  const steps = Math.max(2, Math.ceil(bStepDist / 4));
+                  t.x = prevX; t.y = prevY;
+                  for (let bs = 0; bs < steps; bs++) {
+                    t.x += (endX - prevX) / steps;
+                    t.y += (endY - prevY) / steps;
+                    for (let j = 0; j < world.solids.length; j++) {
+                      const s = world.solids[j];
+                      if (s.walkThrough || s._storyHidden) continue;
+                      if (t.x < s.x - 220 || t.x > s.x + s.w + 220 || t.y < s.y - 220 || t.y > s.y + s.h + 220) continue;
+                      const res = G.MATH.circleRectPush(t.x, t.y, s.type === 'fence' ? t.r + 2 : t.r, s);
+                      if (res.hit) { t.x = res.x; t.y = res.y; }
+                    }
+                  }
+                }
                 t.x = G.MATH.clamp(t.x, 34, world.width - 34);
                 t.y = G.MATH.clamp(t.y, 24, world.height - 24);
                 let bumpedWall = false;
-                for (let j = 0; j < world.solids.length; j++) {
-                  const res = G.MATH.circleRectPush(t.x, t.y, t.r, world.solids[j]);
-                  if (res.hit) {
-                    t.x = res.x;
-                    t.y = res.y;
-                    bumpedWall = true;
+                for (let pass = 0; pass < 2; pass++) {
+                  for (let j = 0; j < world.solids.length; j++) {
+                    const s = world.solids[j];
+                    if (s.walkThrough || s._storyHidden) continue;
+                    if (t.x < s.x - 220 || t.x > s.x + s.w + 220 || t.y < s.y - 220 || t.y > s.y + s.h + 220) continue;
+                    const res = G.MATH.circleRectPush(t.x, t.y, s.type === 'fence' ? t.r + 2 : t.r, s);
+                    if (res.hit) {
+                      t.x = res.x;
+                      t.y = res.y;
+                      bumpedWall = true;
+                    }
                   }
                 }
                 if (bumpedWall && t.aiState === 'patrol' && t.patrolWaypoints && t.patrolWaypoints.length > 0) {
@@ -4498,7 +6975,7 @@
                 let nearHighWall = false;
                 for (let ci = 0; ci < world.solids.length; ci++) {
                   const s = world.solids[ci];
-                  if (!s.high) continue;
+                  if (!s.high || s.walkThrough || s._storyHidden) continue;
                   if (G.MATH.circleRectPush(t.x, t.y, t.r + 9, s).hit) {
                     nearHighWall = true;
                     break;

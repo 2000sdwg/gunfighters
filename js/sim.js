@@ -37,6 +37,38 @@
     return !!(G.CFG && G.CFG.godMode && isLocalPlayer(state, p));
   }
 
+  function resolveCircleSolids(obj, r, world, passes) {
+    if (!obj || !world || !world.solids) return;
+    const nPass = passes || 2;
+    const solids = world.solids;
+    for (let pass = 0; pass < nPass; pass++) {
+      for (let i = 0; i < solids.length; i++) {
+        const s = solids[i];
+        if (s.walkThrough || s._storyHidden) continue;
+        if (obj.x < s.x - 220 || obj.x > s.x + s.w + 220 || obj.y < s.y - 220 || obj.y > s.y + s.h + 220) continue;
+        const rad = s.type === 'fence' ? r + 2 : r;
+        const res = G.MATH.circleRectPush(obj.x, obj.y, rad, s);
+        if (res.hit) {
+          obj.x = res.x;
+          obj.y = res.y;
+        }
+      }
+    }
+  }
+
+  // Пошаговая коллизия против «проскакивания» тонких заборов при кувырке, скачке и отбросе
+  function moveCircleWithSolids(obj, dx, dy, r, world, minX, maxX, minY, maxY) {
+    const dist = Math.hypot(dx, dy);
+    const steps = dist > 5 ? Math.max(2, Math.ceil(dist / 4)) : 1;
+    const sx = dx / steps;
+    const sy = dy / steps;
+    for (let st = 0; st < steps; st++) {
+      obj.x = G.MATH.clamp(obj.x + sx, minX, maxX);
+      obj.y = G.MATH.clamp(obj.y + sy, minY, maxY);
+      resolveCircleSolids(obj, r, world, 2);
+    }
+  }
+
   function showToastFor(state, p, text, dur) {
     if (!state || !text) return;
     if (isLocalPlayer(state, p)) {
@@ -589,6 +621,7 @@
     p.coverNormalY = info.ny;
     p.x = info.nearX + info.nx * (G.CFG.playerRadius + 1.5);
     p.y = info.nearY + info.ny * (G.CFG.playerRadius + 1.5);
+    resolveCircleSolids(p, G.CFG.playerRadius + 0.5, state && state._worldRef ? state._worldRef : null, 3);
     p.vx = 0;
     p.vy = 0;
     // Запоминаем "сложенную" позицию в укрытии: к ней герой возвращается после выглядывания
@@ -601,7 +634,7 @@
     showToastFor(state, p, 'В УКРЫТИИ — ЗАЖМИ ПКМ, ЧТОБЫ ВЫГЛЯНУТЬ', 1.35);
   }
 
-  function exitCover(state, player) {
+  function exitCover(state, player, world) {
     const p = resolvePlayer(state, player);
     if (!p || !p.inCover) return;
     p.inCover = false;
@@ -609,6 +642,7 @@
     p.coverObj = null;
     p.coverAnchorX = undefined;
     p.coverAnchorY = undefined;
+    resolveCircleSolids(p, G.CFG.playerRadius + 0.5, world || (state && state._worldRef), 3);
   }
 
   function pickSpawnForPlayer(state, world, p) {
@@ -1511,8 +1545,14 @@
     if (world.flushBirdFlocksNear) {
       world.flushBirdFlocksNear(muzzle.x, muzzle.y, inZoneShot ? 190 : 300, state);
     }
+    if (world.scareCrowsNear) {
+      world.scareCrowsNear(muzzle.x, muzzle.y, inZoneShot ? 210 : 320, state);
+    }
     if (world.scareSheepNear) {
       world.scareSheepNear(muzzle.x, muzzle.y, inZoneShot ? 160 : 250, state);
+    }
+    if (world.igniteOilPuddlesNear) {
+      world.igniteOilPuddlesNear(muzzle.x, muzzle.y, 125, state);
     }
     if (p.mountedHorse && world.horse && world.horse.riderId === p.id) {
       scareHorse(state, world, muzzle.x, muzzle.y, 16, true);
@@ -1594,8 +1634,11 @@
     executeShot(state, world, p);
   }
 
-  function isInteractableAvailable(state, item) {
+  function isInteractableAvailable(state, item, world) {
     if (!item) return false;
+    if (item.requiresUnlock && world && world.isEntityActive && !world.isEntityActive(item, state)) {
+      return false;
+    }
     if (item.kind === 'bourbon') {
       return !!(state.saloonProps && state.saloonProps.bourbonAvailable);
     }
@@ -1613,7 +1656,7 @@
     const list = world.interactables || [];
     for (let i = 0; i < list.length; i++) {
       const it = list[i];
-      if (!isInteractableAvailable(state, it)) continue;
+      if (!isInteractableAvailable(state, it, world)) continue;
       const rad = it.r || 42;
       const d = G.MATH.dist(p.x, p.y, it.x, it.y);
       if (d <= rad && d < bestDist) {
@@ -1677,15 +1720,7 @@
         hr.speed = 0;
       }
     }
-    if (world && world.solids) {
-      for (let i = 0; i < world.solids.length; i++) {
-        const res = G.MATH.circleRectPush(p.x, p.y, G.CFG.playerRadius + 1, world.solids[i]);
-        if (res.hit) {
-          p.x = res.x;
-          p.y = res.y;
-        }
-      }
-    }
+    resolveCircleSolids(p, G.CFG.playerRadius + 1, world, 3);
     if (thrown) {
       if (!isPlayerGod(state, p)) {
         p.stunTimer = Math.max(p.stunTimer || 0, 0.6);
@@ -1796,6 +1831,16 @@
       return true;
     }
 
+    if (item.kind === 'dartboard') {
+      showToastFor(state, p, 'ДАРТС (СКОРО В МИНИ-ИГРАХ)', 1.5);
+      return true;
+    }
+
+    if (item.kind === 'notice_board') {
+      showToastFor(state, p, 'ДОСКА ОБЪЯВЛЕНИЙ', 1.4);
+      return true;
+    }
+
     return false;
   }
 
@@ -1849,17 +1894,118 @@
     }
   }
 
+  function resetTransientState(state, world) {
+    if (!state) return;
+    state.bullets = [];
+    state.shells = [];
+    state.decals = [];
+    state.particles = [];
+    state.bloodDrops = [];
+    state.bloodTrail = [];
+    state.flyingHats = [];
+    state.gunSmokeClouds = [];
+    state.smokeFlashes = [];
+    state.waterRipples = [];
+    state.floatTexts = [];
+    state.reloadEvents = [];
+    state.debugRays = [];
+    if (state.netEvents) state.netEvents = [];
+    state.fleeCooldown = 0;
+    state.hatMenuOpen = false;
+    state.nearInteractable = null;
+    state.toast = { text: '', timer: 0 };
+    if (state.waves) {
+      state.waves.active = false;
+      state.waves.wave = 0;
+      state.waves.phase = 'idle';
+      state.waves.breakTimer = 0;
+      state.waves.totalSpawned = 0;
+    }
+    if (state.dustStorm) {
+      state.dustStorm.active = false;
+      state.dustStorm.intensity = 0;
+      state.dustStorm.timer = 0;
+      state.dustStorm.duration = 0;
+      state.dustStorm.cooldown = 36;
+      state.dustStorm.tumbleweeds = [];
+    }
+    const sp = (world && world.playerSpawn) || (world && world.layout && world.layout.playerSpawn) || { x: 215, y: 400 };
+    const pls = getPlayers(state);
+    for (let i = 0; i < pls.length; i++) {
+      const pl = pls[i];
+      if (!pl) continue;
+      pl.x = sp.x;
+      pl.y = sp.y;
+      pl.vx = 0;
+      pl.vy = 0;
+      pl.knockVx = 0;
+      pl.knockVy = 0;
+      pl.hp = pl.maxHp || 100;
+      pl.dead = false;
+      pl.critical = false;
+      pl.bleeding = false;
+      pl.concussion = 0;
+      pl.indoorRingTimer = 0;
+      pl.stunTimer = 0;
+      pl.snakeSlowTimer = 0;
+      pl.fireDmgCd = 0;
+      pl.rolling = false;
+      pl.rollTimer = 0;
+      pl.mountedHorse = false;
+      pl.inCover = false;
+      pl.peeking = false;
+      pl.coverObj = null;
+      pl.bandaging = false;
+      pl.drinking = false;
+      pl.smokingState = null;
+      if (pl.weapons) {
+        pl.weapons.forEach((ws) => {
+          const def = getWeaponById(ws.id);
+          ws.ammo = def.capacity;
+          ws.reserve = def.defaultReserve;
+          ws.reloading = false;
+          ws.reloadTimer = 0;
+          ws.reloadOpenFrac = 0;
+          ws.cockTimer = 0;
+          ws.cocked = true;
+        });
+      }
+      if (world) resolveCircleSolids(pl, G.CFG.playerRadius + 1, world, 3);
+    }
+    state.camera.x = sp.x;
+    state.camera.y = sp.y;
+    state.camera.shakeX = 0;
+    state.camera.shakeY = 0;
+    state.camera.shakeMag = 0;
+    if (state.editor) {
+      state.editor.camX = sp.x;
+      state.editor.camY = sp.y;
+      state.editor.hoverSolidId = null;
+      state.editor.hoverEntity = null;
+    }
+    if (G.AUDIO.setConcussion) G.AUDIO.setConcussion(0);
+    if (G.AUDIO.updateWind) G.AUDIO.updateWind(0, false, state.time || 0);
+  }
+
   function toggleEditorMode(state, world, forcedState) {
     if (!state.editor) {
-      state.editor = { active: false, tool: 'place', tab: 'objects', selectedType: 'crate', rotated: false, gridStep: 8, hoverSolidId: null, hoverEntity: null, camX: state.camera.x, camY: state.camera.y };
+      state.editor = {
+        active: false, tool: 'place', tab: 'objects', selectedType: 'crate',
+        rotated: false, gridStep: 4, brushSize: 1, selectedEntity: null,
+        pendingTagId: '', pendingRequiresUnlock: '',
+        hoverSolidId: null, hoverEntity: null, camX: state.camera.x, camY: state.camera.y
+      };
     }
     if (!state.editor.tab) state.editor.tab = 'objects';
+    if (!state.editor.gridStep || state.editor.gridStep === 8) state.editor.gridStep = 4;
     const next = forcedState !== undefined ? !!forcedState : !state.editor.active;
     state.editor.active = next;
+    state.screen = next ? 'editor' : 'playing';
     state.input.lmb = false;
     state.input.rmb = false;
     state.hatMenuOpen = false;
     closeReload(state);
+    if (world && world.rebuildStoryVisibility) world.rebuildStoryVisibility(state);
     if (next) {
       state.editor.camX = state.camera.x;
       state.editor.camY = state.camera.y;
@@ -1869,6 +2015,7 @@
     } else {
       state.editor.hoverSolidId = null;
       state.editor.hoverEntity = null;
+      state.editor.selectedEntity = null;
       showToast(state, 'БОЙ ВОЗОБНОВЛЁН', 1.2);
     }
   }
@@ -1877,18 +2024,55 @@
     const p = resolvePlayer(state, player);
     if (!p) return;
     if (isLocalPlayer(state, p) && state.editor && state.editor.active) {
+      const ed = state.editor;
       if (code === 'Escape') {
         toggleEditorMode(state, world, false);
         return;
       }
+      if (code === 'KeyM') {
+        ed.tool = ed.tool === 'move' ? 'place' : 'move';
+        if (ed.tool !== 'move') ed.selectedEntity = null;
+        showToast(state, ed.tool === 'move' ? 'ИНСТРУМЕНТ: ПЕРЕМЕЩЕНИЕ [M]' : 'ИНСТРУМЕНТ: РАЗМЕЩЕНИЕ', 0.9);
+        return;
+      }
       if (code === 'KeyQ' || code === 'KeyE' || code === 'KeyR') {
-        state.editor.rotated = !state.editor.rotated;
-        showToast(state, state.editor.rotated ? 'ПОВЕРНУТО (ВЕРТИКАЛЬНО)' : 'ПОВЕРНУТО (ГОРИЗОНТАЛЬНО)', 0.9);
+        if (ed.tool === 'move' && ed.selectedEntity && world && world.rotateEditorEntity) {
+          if (world.rotateEditorEntity(ed.selectedEntity, state)) {
+            if (G.NET && G.NET.broadcastMapSync) G.NET.broadcastMapSync(state, world);
+            showToast(state, 'ОБЪЕКТ ПОВЁРНУТ', 0.8);
+            return;
+          }
+        }
+        ed.rotated = !ed.rotated;
+        showToast(state, ed.rotated ? 'ПОВЕРНУТО (ВЕРТИКАЛЬНО)' : 'ПОВЕРНУТО (ГОРИЗОНТАЛЬНО)', 0.9);
         return;
       }
       if (code === 'Delete' || code === 'Backspace' || code === 'KeyX') {
-        state.editor.tool = state.editor.tool === 'erase' ? 'place' : 'erase';
-        showToast(state, state.editor.tool === 'erase' ? 'ИНСТРУМЕНТ: УДАЛЕНИЕ' : 'ИНСТРУМЕНТ: РАЗМЕЩЕНИЕ', 0.9);
+        if (ed.tool === 'move' && ed.selectedEntity && world && world.removeEditorEntity) {
+          if (world.removeEditorEntity(ed.selectedEntity, state)) {
+            ed.selectedEntity = null;
+            if (G.NET && G.NET.broadcastMapSync) G.NET.broadcastMapSync(state, world);
+            showToast(state, 'ОБЪЕКТ УДАЛЁН', 0.8);
+            return;
+          }
+        }
+        ed.tool = ed.tool === 'erase' ? 'place' : 'erase';
+        ed.selectedEntity = null;
+        showToast(state, ed.tool === 'erase' ? 'ИНСТРУМЕНТ: УДАЛЕНИЕ' : 'ИНСТРУМЕНТ: РАЗМЕЩЕНИЕ', 0.9);
+        return;
+      }
+      if (ed.tool === 'move' && ed.selectedEntity && world && world.moveEditorEntity &&
+          (code === 'ArrowLeft' || code === 'ArrowRight' || code === 'ArrowUp' || code === 'ArrowDown')) {
+        const hit = ed.selectedEntity;
+        const step = (state.input && state.input.keys && (state.input.keys.AltLeft || state.input.keys.AltRight)) ? 1 : (ed.gridStep || 4);
+        const dx = code === 'ArrowLeft' ? -step : (code === 'ArrowRight' ? step : 0);
+        const dy = code === 'ArrowUp' ? -step : (code === 'ArrowDown' ? step : 0);
+        const curX = (hit.kind === 'solid' || hit.kind === 'zone' || hit.kind === 'door_pair') ? hit.x : (hit.obj ? hit.obj.x : hit.x);
+        const curY = (hit.kind === 'solid' || hit.kind === 'zone' || hit.kind === 'door_pair') ? hit.y : (hit.obj ? hit.obj.y : hit.y);
+        if (world.moveEditorEntity(hit, curX + dx, curY + dy, state)) {
+          if (hit.kind === 'solid' && world.rebuildGeometry) world.rebuildGeometry();
+          if (G.NET && G.NET.broadcastMapSync) G.NET.broadcastMapSync(state, world);
+        }
         return;
       }
       return;
@@ -2016,7 +2200,9 @@
       // Проверяем, не занята ли точка препятствием
       let blocked = false;
       for (let j = 0; j < world.solids.length; j++) {
-        if (G.MATH.circleRectPush(sx, sy, t.r + 2, world.solids[j]).hit) {
+        const s = world.solids[j];
+        if (s.walkThrough || s._storyHidden) continue;
+        if (G.MATH.circleRectPush(sx, sy, t.r + 2, s).hit) {
           blocked = true;
           break;
         }
@@ -2462,8 +2648,14 @@
               if (world.flushBirdFlocksNear) {
                 world.flushBirdFlocksNear(muzzleX, muzzleY, inZoneB ? 190 : 300, state);
               }
+              if (world.scareCrowsNear) {
+                world.scareCrowsNear(muzzleX, muzzleY, inZoneB ? 210 : 320, state);
+              }
               if (world.scareSheepNear) {
                 world.scareSheepNear(muzzleX, muzzleY, inZoneB ? 160 : 250, state);
+              }
+              if (world.igniteOilPuddlesNear) {
+                world.igniteOilPuddlesNear(muzzleX, muzzleY, 125, state);
               }
               scareHorse(state, world, muzzleX, muzzleY, 20, false);
               spawnParticles(state, muzzleX, muzzleY, 6, {
@@ -2680,6 +2872,101 @@
           }
         }
 
+        // Проверка пролёта пули над не горящими масляными пятнами (поджигает масло!)
+        if (world.oilPuddles && world.oilPuddles.length) {
+          for (let opi = 0; opi < world.oilPuddles.length; opi++) {
+            const pd = world.oilPuddles[opi];
+            if (!pd || pd.burning || pd.wetExtinguished) continue;
+            const pox = pd.x - b.x;
+            const poy = pd.y - b.y;
+            const pproj = pox * b.dx + poy * b.dy;
+            const clampP = G.MATH.clamp(pproj, 0, bestDist);
+            const dxP = pox - b.dx * clampP;
+            const dyP = poy - b.dy * clampP;
+            if (dxP * dxP + dyP * dyP <= pd.r * pd.r) {
+              if (world.igniteOilPuddlesNear) world.igniteOilPuddlesNear(pd.x, pd.y, 4, state);
+            }
+          }
+        }
+
+        // Проверка попадания в масляные лампы
+        let hitLamp = null;
+        if (world.oilLamps && world.oilLamps.length) {
+          for (let li = 0; li < world.oilLamps.length; li++) {
+            const lm = world.oilLamps[li];
+            if (!lm || !lm.alive) continue;
+            const lox = lm.x - b.x;
+            const loy = lm.y - b.y;
+            const lproj = lox * b.dx + loy * b.dy;
+            if (lproj >= 0 && lproj <= bestDist) {
+              const lperp2 = lox * lox + loy * loy - lproj * lproj;
+              const lrad = (lm.r || 6) + 2;
+              if (lperp2 <= lrad * lrad) {
+                bestDist = lproj;
+                hitLamp = lm;
+                hitSheep = null;
+                hitHorse = false;
+                hitTarget = null;
+                hitPlayerObj = null;
+                hitWall = null;
+              }
+            }
+          }
+        }
+
+        // Проверка попадания в гремучих змей (hp: 15)
+        let hitSnake = null;
+        if (world.snakes && world.snakes.length) {
+          for (let sni = 0; sni < world.snakes.length; sni++) {
+            const sn = world.snakes[sni];
+            if (!sn || !sn.alive) continue;
+            const sox = sn.x - b.x;
+            const soy = sn.y - b.y;
+            const sproj = sox * b.dx + soy * b.dy;
+            if (sproj >= 0 && sproj <= bestDist) {
+              const sperp2 = sox * sox + soy * soy - sproj * sproj;
+              const srad = (sn.r || 8) + 2;
+              if (sperp2 <= srad * srad) {
+                bestDist = sproj;
+                hitSnake = sn;
+                hitLamp = null;
+                hitSheep = null;
+                hitHorse = false;
+                hitTarget = null;
+                hitPlayerObj = null;
+                hitWall = null;
+              }
+            }
+          }
+        }
+
+        if (hitLamp) {
+          const lx = b.x + b.dx * bestDist;
+          const ly = b.y + b.dy * bestDist;
+          if (world.breakOilLamp) world.breakOilLamp(hitLamp, lx, ly, state);
+          if (b.ricocheted && world.igniteOilPuddlesNear) {
+            world.igniteOilPuddlesNear(lx, ly, 38, state);
+          }
+          aliveBullet = false;
+          break;
+        }
+
+        if (hitSnake) {
+          const sx = b.x + b.dx * bestDist;
+          const sy = b.y + b.dy * bestDist;
+          const hitCalc = calcBulletDamage(b, bestDist);
+          hitSnake.hp = Math.max(0, (hitSnake.hp || 15) - hitCalc.dmg);
+          hitSnake.hitFlash = 0.16;
+          G.AUDIO.playImpact('flesh');
+          spawnBloodBurst(state, sx, sy, b.dx, b.dy, hitCalc.dmg, hitSnake.hp <= 0);
+          if (hitSnake.hp <= 0) {
+            hitSnake.alive = false;
+            addDecal(state, hitSnake.x, hitSnake.y, 5, P.blood ? P.blood[2] : '#6e100c');
+          }
+          aliveBullet = false;
+          break;
+        }
+
         if (hitSheep) {
           const sx = b.x + b.dx * bestDist;
           const sy = b.y + b.dy * bestDist;
@@ -2840,7 +3127,7 @@
             state.camera.shakeMag = Math.max(state.camera.shakeMag, 4.5);
           }
           spawnBloodBurst(state, p.x, p.y, b.dx, b.dy, dmg, p.hp <= 0);
-          spawnFloatText(state, p.x, p.y - 8, `-${dmg}`, P.blood[0], true);
+          spawnFloatText(state, p.x, p.y - 8, b.ricocheted ? `РИКОШЕТ! -${dmg}` : `-${dmg}`, b.ricocheted ? P.brass[0] : P.blood[0], true);
           aliveBullet = false;
           break;
         }
@@ -2934,7 +3221,8 @@
             spawnBloodBurst(state, hx, hy, b.dx, b.dy, dealt, isFatal);
 
             if (isFatal) {
-              spawnFloatText(state, hitTarget.x, hitTarget.y - 4, isArmHit ? `РУКА -${dealt}` : `-${dealt}`, P.blood[0], true);
+              const fTxt = b.ricocheted ? `РИКОШЕТ! -${dealt}` : (isArmHit ? `РУКА -${dealt}` : `-${dealt}`);
+              spawnFloatText(state, hitTarget.x, hitTarget.y - 4, fTxt, b.ricocheted ? P.brass[0] : P.blood[0], true);
               hitTarget.alive = false;
               hitTarget.respawnTimer = 0;
               hitTarget.deathAnim = 0;
@@ -2950,9 +3238,9 @@
                 }
               }
             } else {
-              const lbl = isArmHit ? `РУКА -${dealt}` : `-${dealt}`;
-              const col = isArmHit ? P.canyon[0] : (hitCalc.mult < 0.8 ? P.woodPale[0] : P.grass[0]);
-              spawnFloatText(state, hitTarget.x, hitTarget.y - 2, lbl, col, false);
+              const lbl = b.ricocheted ? `РИКОШЕТ! -${dealt}` : (isArmHit ? `РУКА -${dealt}` : `-${dealt}`);
+              const col = b.ricocheted ? P.brass[0] : (isArmHit ? P.canyon[0] : (hitCalc.mult < 0.8 ? P.woodPale[0] : P.grass[0]));
+              spawnFloatText(state, hitTarget.x, hitTarget.y - 2, lbl, col, !!b.ricocheted);
 
               if (hitTarget.aiState !== 'flee' && hitTarget.aiState !== 'no_ammo_retreat' && !hitTarget.fledOnce && !hitTarget.isReinforcement && (state.fleeCooldown || 0) <= 0) {
                 let anyFleeing = false;
@@ -3030,9 +3318,10 @@
             d.vel += (b.dx >= 0 ? -1 : 1) * (d.baseAngle > 0 ? 1 : -1) * 4.5;
           }
 
-          // Реальный рикошет от камня (rock) или металла (metal) под острым углом (< 0.55)
+          // Реальный рикошет: от металла cosInc < 0.78, от камня/скалы cosInc < 0.62 (до 2 рикошетов)
           const cosInc = Math.abs(b.dx * hitWall.nx + b.dy * hitWall.ny);
-          if ((mat === 'rock' || mat === 'metal') && cosInc < 0.55 && (b.ricochets || 0) < 2) {
+          const ricCosLimit = mat === 'metal' ? 0.78 : (mat === 'rock' ? 0.62 : 0);
+          if ((mat === 'rock' || mat === 'metal') && cosInc < ricCosLimit && (b.ricochets || 0) < 2) {
             const dot = b.dx * hitWall.nx + b.dy * hitWall.ny;
             b.dx -= 2 * dot * hitWall.nx;
             b.dy -= 2 * dot * hitWall.ny;
@@ -3052,12 +3341,27 @@
             const ricLstW = resolvePlayer(state);
             if (G.AUDIO.playRicochet) G.AUDIO.playRicochet(hitWall.x, hitWall.y, ricLstW ? ricLstW.x : hitWall.x, ricLstW ? ricLstW.y : hitWall.y);
             pushNetEvent(state, { kind: 'ricochet', x: hitWall.x, y: hitWall.y });
-            spawnParticles(state, hitWall.x, hitWall.y, 12, {
-              baseAngle: Math.atan2(b.dy, b.dx), spread: 0.55, minSpeed: 80, maxSpeed: 210,
-              minLife: 0.12, maxLife: 0.30, minSize: 1.2, maxSize: 2.3,
+            spawnParticles(state, hitWall.x, hitWall.y, mat === 'metal' ? 16 : 12, {
+              baseAngle: Math.atan2(b.dy, b.dx), spread: 0.62, minSpeed: 90, maxSpeed: 230,
+              minLife: 0.14, maxLife: 0.34, minSize: 1.3, maxSize: 2.5,
               colors: [P.brass[0], P.grass[0], '#ffffff'], kind: 'spark'
             });
+            if (world.igniteOilPuddlesNear) {
+              world.igniteOilPuddlesNear(hitWall.x, hitWall.y, 38, state);
+            }
             continue;
+          }
+
+          if (mat === 'metal') {
+            // Сноп искр при лобовом попадании в металл (способно поджечь масло рядом)
+            spawnParticles(state, hitWall.x, hitWall.y, 12, {
+              baseAngle: reflAngle, spread: 0.85, minSpeed: 75, maxSpeed: 185,
+              minLife: 0.12, maxLife: 0.28, minSize: 1.2, maxSize: 2.3,
+              colors: [P.brass[0], P.grass[0], '#ffffff'], kind: 'spark'
+            });
+          }
+          if (world.igniteOilPuddlesNear) {
+            world.igniteOilPuddlesNear(hitWall.x, hitWall.y, 38, state);
           }
 
           // Проверяем пробитие ДО обновления состояния бреши (чтобы 2-й выстрел Винчестера обнулил укрытие, а пробитие началось с 3-го)
@@ -3177,6 +3481,7 @@
       let hitSolid = false;
       for (let j = 0; j < world.solids.length; j++) {
         const s = world.solids[j];
+        if (s.walkThrough || s._storyHidden) continue;
         if (nx >= s.x && nx <= s.x + s.w && ny >= s.y && ny <= s.y + s.h) {
           addDecal(state, bd.x, bd.y, bd.size * 0.95, bd.color, {
             kind: 'blood',
@@ -3241,6 +3546,7 @@
       let hit = false;
       for (let j = 0; j < world.solids.length; j++) {
         const s = world.solids[j];
+        if (s.walkThrough || s._storyHidden) continue;
         if (nx > s.x - 4 && nx < s.x + s.w + 4 && ny > s.y - 4 && ny < s.y + s.h + 4) {
           h.vx = -h.vx * 0.4;
           h.vy = -h.vy * 0.4;
@@ -3297,6 +3603,7 @@
       let bouncedWall = false;
       for (let j = 0; j < world.solids.length; j++) {
         const s = world.solids[j];
+        if (s.walkThrough || s._storyHidden) continue;
         if (nx > s.x - 2 && nx < s.x + s.w + 2 && ny > s.y - 2 && ny < s.y + s.h + 2) {
           const prevInsideX = sh.x > s.x - 2 && sh.x < s.x + s.w + 2;
           if (prevInsideX) sh.vy = -sh.vy * 0.55;
@@ -3602,6 +3909,18 @@
     const P = getPal();
     if (hr.hitFlash > 0) hr.hitFlash = Math.max(0, hr.hitFlash - dt);
     if (hr._neighCd > 0) hr._neighCd = Math.max(0, hr._neighCd - dt);
+    if (hr.swerveTimer > 0) hr.swerveTimer = Math.max(0, hr.swerveTimer - dt);
+    if (hr.swerveCd > 0) hr.swerveCd = Math.max(0, hr.swerveCd - dt);
+
+    // Наезд галопирующей лошади разбивает масляные лампы
+    if ((hr.speed || 0) > 120 && world.oilLamps && world.oilLamps.length) {
+      for (let li = 0; li < world.oilLamps.length; li++) {
+        const lm = world.oilLamps[li];
+        if (lm && lm.alive && G.MATH.dist(hr.x, hr.y, lm.x, lm.y) <= (hr.r || 15) + (lm.r || 6)) {
+          if (world.breakOilLamp) world.breakOilLamp(lm, lm.x, lm.y, state);
+        }
+      }
+    }
     if (hr.trampleCooldowns) {
       const tKeys = Object.keys(hr.trampleCooldowns);
       for (let i = 0; i < tKeys.length; i++) {
@@ -3656,19 +3975,20 @@
       const sy = Math.sin(hr.stampedeAngle || 0) * stSpd;
       hr.vx = G.MATH.lerp(hr.vx || 0, sx, Math.min(1, dt * 8));
       hr.vy = G.MATH.lerp(hr.vy || 0, sy, Math.min(1, dt * 8));
-      const nx = hr.x + hr.vx * dt;
-      const ny = hr.y + hr.vy * dt;
-      hr.x = nx;
-      hr.y = ny;
+      const nx = hr.vx * dt;
+      const ny = hr.vy * dt;
+      moveCircleWithSolids(hr, nx, ny, hr.r || 15, world, 48, world.width - 48, 36, world.height - 36);
 
       let bounced = false;
-      if (hr.x < 48) { hr.x = 48; hr.stampedeAngle = G.MATH.rand(-0.8, 0.8); bounced = true; }
-      else if (hr.x > world.width - 48) { hr.x = world.width - 48; hr.stampedeAngle = Math.PI + G.MATH.rand(-0.8, 0.8); bounced = true; }
-      if (hr.y < 36) { hr.y = 36; hr.stampedeAngle = Math.PI * 0.5 + G.MATH.rand(-0.6, 0.6); bounced = true; }
-      else if (hr.y > world.height - 36) { hr.y = world.height - 36; hr.stampedeAngle = -Math.PI * 0.5 + G.MATH.rand(-0.6, 0.6); bounced = true; }
+      if (hr.x <= 49) { hr.stampedeAngle = G.MATH.rand(-0.8, 0.8); bounced = true; }
+      else if (hr.x >= world.width - 49) { hr.stampedeAngle = Math.PI + G.MATH.rand(-0.8, 0.8); bounced = true; }
+      if (hr.y <= 37) { hr.stampedeAngle = Math.PI * 0.5 + G.MATH.rand(-0.6, 0.6); bounced = true; }
+      else if (hr.y >= world.height - 37) { hr.stampedeAngle = -Math.PI * 0.5 + G.MATH.rand(-0.6, 0.6); bounced = true; }
 
       for (let i = 0; i < world.solids.length; i++) {
-        const res = G.MATH.circleRectPush(hr.x, hr.y, hr.r || 13, world.solids[i]);
+        const hs = world.solids[i];
+        if (hs.walkThrough || hs._storyHidden) continue;
+        const res = G.MATH.circleRectPush(hr.x, hr.y, hr.r || 15, hs);
         if (res.hit) {
           hr.x = res.x;
           hr.y = res.y;
@@ -3820,10 +4140,10 @@
     if (p.hurtTimer > 0) p.hurtTimer = Math.max(0, p.hurtTimer - dt);
     if (p.doorHitCd > 0) p.doorHitCd = Math.max(0, p.doorHitCd - dt);
     if (p.stunTimer > 0) p.stunTimer = Math.max(0, p.stunTimer - dt);
+    if (p.snakeSlowTimer > 0) p.snakeSlowTimer = Math.max(0, p.snakeSlowTimer - dt);
 
     if (Math.hypot(p.knockVx || 0, p.knockVy || 0) > 1) {
-      p.x += (p.knockVx || 0) * dt;
-      p.y += (p.knockVy || 0) * dt;
+      moveCircleWithSolids(p, (p.knockVx || 0) * dt, (p.knockVy || 0) * dt, G.CFG.playerRadius, world, 30, world.width - 30, 20, world.height - 20);
       const kd = Math.exp(-10 * dt);
       p.knockVx *= kd;
       p.knockVy *= kd;
@@ -3941,21 +4261,16 @@
           moveY /= mLen;
         }
         const mountMaxSpd = p.bandaging ? 80 : (p.drinking ? 90 : 210);
-        activeHorse.vx = G.MATH.lerp(activeHorse.vx || 0, moveX * mountMaxSpd, Math.min(1, dt * 8.5));
-        activeHorse.vy = G.MATH.lerp(activeHorse.vy || 0, moveY * mountMaxSpd, Math.min(1, dt * 8.5));
-        activeHorse.x += activeHorse.vx * dt;
-        activeHorse.y += activeHorse.vy * dt;
-        activeHorse.x = G.MATH.clamp(activeHorse.x, 38, world.width - 38);
-        activeHorse.y = G.MATH.clamp(activeHorse.y, 28, world.height - 28);
-        for (let pass = 0; pass < 2; pass++) {
-          for (let i = 0; i < world.solids.length; i++) {
-            const res = G.MATH.circleRectPush(activeHorse.x, activeHorse.y, activeHorse.r || 13, world.solids[i]);
-            if (res.hit) {
-              activeHorse.x = res.x;
-              activeHorse.y = res.y;
-            }
-          }
+        if ((activeHorse.swerveTimer || 0) > 0) {
+          // Увод курса лошади от змеи без паники и сброса всадника
+          const swAng = activeHorse.swerveAngle !== undefined ? activeHorse.swerveAngle : (activeHorse.angle || 0);
+          activeHorse.vx = G.MATH.lerp(activeHorse.vx || 0, Math.cos(swAng) * Math.max(135, activeHorse.speed || 0), Math.min(1, dt * 12));
+          activeHorse.vy = G.MATH.lerp(activeHorse.vy || 0, Math.sin(swAng) * Math.max(135, activeHorse.speed || 0), Math.min(1, dt * 12));
+        } else {
+          activeHorse.vx = G.MATH.lerp(activeHorse.vx || 0, moveX * mountMaxSpd, Math.min(1, dt * 8.5));
+          activeHorse.vy = G.MATH.lerp(activeHorse.vy || 0, moveY * mountMaxSpd, Math.min(1, dt * 8.5));
         }
+        moveCircleWithSolids(activeHorse, activeHorse.vx * dt, activeHorse.vy * dt, activeHorse.r || 15, world, 38, world.width - 38, 28, world.height - 28);
         activeHorse.speed = Math.hypot(activeHorse.vx, activeHorse.vy);
         if (activeHorse.speed > 20) {
           const wantHAng = Math.atan2(activeHorse.vy, activeHorse.vx);
@@ -3970,8 +4285,7 @@
       p.rollTimer -= dt;
       p.vx = p.rollDx * G.CFG.rollSpeed;
       p.vy = p.rollDy * G.CFG.rollSpeed;
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
+      moveCircleWithSolids(p, p.vx * dt, p.vy * dt, G.CFG.playerRadius, world, 30, world.width - 30, 20, world.height - 20);
 
       const rProg = 1 - p.rollTimer / G.CFG.rollDur;
       if (!p.rollMidDust && rProg >= 0.45) {
@@ -4083,7 +4397,7 @@
         const ty2 = p.coverNormalX;
         const along = moveX * tx2 + moveY * ty2;
         if (perp > 0.55) {
-          exitCover(state, p);
+          exitCover(state, p, world);
         } else if (Math.abs(along) > 0.05 && p.coverObj) {
           const c = p.coverObj;
           const slide = along * G.CFG.focusSpeed * dt * 0.9;
@@ -4101,6 +4415,7 @@
       else if (p.drinking) maxSpd = 32;
       else if (ws.reloading) maxSpd = G.CFG.reloadSpeed;
       else if (focus) maxSpd = G.CFG.focusSpeed;
+      if ((p.snakeSlowTimer || 0) > 0) maxSpd *= 0.55;
 
       if (moveX !== 0 || moveY !== 0) {
         const len = Math.hypot(moveX, moveY);
@@ -4110,8 +4425,7 @@
 
       p.vx = G.MATH.lerp(p.vx, moveX * maxSpd, Math.min(1, dt * 14));
       p.vy = G.MATH.lerp(p.vy, moveY * maxSpd, Math.min(1, dt * 14));
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
+      moveCircleWithSolids(p, p.vx * dt, p.vy * dt, G.CFG.playerRadius, world, 30, world.width - 30, 20, world.height - 20);
     }
 
     const targetPeek = (p.inCover && p.peeking) ? 1 : 0;
@@ -4124,12 +4438,40 @@
 
     p.x = G.MATH.clamp(p.x, 30, world.width - 30);
     p.y = G.MATH.clamp(p.y, 20, world.height - 20);
-    for (let pass = 0; pass < 2; pass++) {
-      for (let i = 0; i < world.solids.length; i++) {
-        const res = G.MATH.circleRectPush(p.x, p.y, G.CFG.playerRadius, world.solids[i]);
-        if (res.hit) {
-          p.x = res.x;
-          p.y = res.y;
+    resolveCircleSolids(p, G.CFG.playerRadius, world, 2);
+
+    // Ожог при наступлении на активный костёр (лёгкий урон огнём)
+    if ((p.fireTickCd || 0) > 0) p.fireTickCd = Math.max(0, p.fireTickCd - dt);
+    if (!p.dead && !p.rolling && !p.mountedHorse && world && world.solids && !isPlayerGod(state, p)) {
+      const wet = world.isPointWet && world.isPointWet(p.x, p.y);
+      if (!wet) {
+        for (let ci = 0; ci < world.solids.length; ci++) {
+          const cf = world.solids[ci];
+          if (cf.type !== 'campfire' || cf._storyHidden) continue;
+          const cx = cf.x + cf.w * 0.5;
+          const cy = cf.y + cf.h * 0.5;
+          if (G.MATH.dist(p.x, p.y, cx, cy) <= 13) {
+            if ((p.fireTickCd || 0) <= 0) {
+              p.fireTickCd = 0.45;
+              p.hp = Math.max(0, (p.hp || 100) - 6);
+              p.hurtTimer = Math.max(p.hurtTimer || 0, 0.28);
+              spawnFloatText(state, p.x, p.y - 12, '-6 ОГОНЬ', P.barnRed ? P.barnRed[0] : '#c9241c', false);
+              spawnParticles(state, p.x, p.y, 4, {
+                baseAngle: -Math.PI * 0.5, spread: 1.4, minSpeed: 18, maxSpeed: 42,
+                minLife: 0.2, maxLife: 0.42, minSize: 1.2, maxSize: 2.2, drag: 3.5,
+                colors: ['#f2da91', '#c9241c'], alpha: 0.85, kind: 'spark'
+              });
+              if (G.AUDIO.playImpact) G.AUDIO.playImpact('flesh');
+              if (p.hp <= 0) {
+                p.hp = 0;
+                p.dead = true;
+                p.bleeding = false;
+                p.critical = false;
+                if (state.mpMode === 'pvp') p.deaths = (p.deaths || 0) + 1;
+              }
+            }
+            break;
+          }
         }
       }
     }
@@ -4548,11 +4890,13 @@
     scareHorse,
     mountHorse,
     dismountHorse,
+    resetTransientState,
     updateSinglePlayer,
 
     update(state, world, dt) {
       dt = Math.min(dt, 0.033);
       state.time += dt;
+      state._worldRef = world;
       if (G.syncPlayersCache) G.syncPlayersCache(state);
       if (!state.waterRipples) state.waterRipples = [];
       if (!state.bloodDrops) state.bloodDrops = [];
@@ -4567,6 +4911,33 @@
       if (state.toast.timer > 0) {
         state.toast.timer = Math.max(0, state.toast.timer - dt);
       }
+
+      // Главное меню: живая панорама салуна и улицы, бой и ИИ на паузе
+      if (state.screen === 'menu') {
+        const spanW = world && world.width ? world.width : 1400;
+        const spanH = world && world.height ? world.height : 840;
+        const baseX = spanW >= 1800 ? 680 : spanW * 0.5;
+        const ampX = Math.min(380, Math.max(40, spanW * 0.24));
+        const baseY = spanH >= 900 ? 405 : spanH * 0.5;
+        const ampY = Math.min(65, Math.max(18, spanH * 0.08));
+        state.camera.x = G.MATH.clamp(baseX + Math.sin(state.time * 0.14) * ampX, 180, Math.max(200, spanW - 180));
+        state.camera.y = G.MATH.clamp(baseY + Math.sin(state.time * 0.21 + 0.6) * ampY, 120, Math.max(140, spanH - 120));
+        state.camera.shakeX = 0;
+        state.camera.shakeY = 0;
+        state.camera.shakeMag = 0;
+        if (G.AUDIO.setConcussion) G.AUDIO.setConcussion(0);
+        if (G.AUDIO.updateWind) G.AUDIO.updateWind(0, false, state.time);
+        return;
+      }
+
+      // Пауза в одиночном режиме замораживает симуляцию и приглушает ветер/звон
+      if (state.screen === 'paused') {
+        if (G.AUDIO.setConcussion) G.AUDIO.setConcussion(0);
+        if (G.AUDIO.updateWind) G.AUDIO.updateWind(0, true, state.time);
+        if (state.netRole !== 'host' && state.netRole !== 'client') {
+          return;
+        }
+      }
       if (state.fleeCooldown > 0) {
         state.fleeCooldown = Math.max(0, state.fleeCooldown - dt);
       }
@@ -4575,12 +4946,13 @@
       const edActive = !!(state.editor && state.editor.active);
       if (edActive) {
         const keys = input.keys || {};
+        const edBlockArrows = state.editor.tool === 'move' && !!state.editor.selectedEntity;
         let mx = 0;
         let my = 0;
-        if (keys.KeyW || keys.ArrowUp) my -= 1;
-        if (keys.KeyS || keys.ArrowDown) my += 1;
-        if (keys.KeyA || keys.ArrowLeft) mx -= 1;
-        if (keys.KeyD || keys.ArrowRight) mx += 1;
+        if (keys.KeyW || (!edBlockArrows && keys.ArrowUp)) my -= 1;
+        if (keys.KeyS || (!edBlockArrows && keys.ArrowDown)) my += 1;
+        if (keys.KeyA || (!edBlockArrows && keys.ArrowLeft)) mx -= 1;
+        if (keys.KeyD || (!edBlockArrows && keys.ArrowRight)) mx += 1;
         if (mx !== 0 || my !== 0) {
           const len = Math.hypot(mx, my);
           mx /= len; my /= len;
@@ -4597,13 +4969,14 @@
       }
 
       // 1. Обновляем каждого игрока (локального и всех сетевых участников)
+      const localPaused = edActive || state.screen === 'paused';
       let localRenderPos = localP ? getRenderPos(localP) : { x: 150, y: 360 };
       for (let i = 0; i < playersList.length; i++) {
         const pl = playersList[i];
         const isLoc = pl === localP;
-        const pInput = (isLoc && !edActive) ? input : (pl.input || { keys: {}, worldMouseX: pl.x + 60, worldMouseY: pl.y, lmb: false, rmb: false });
-        if (isLoc && edActive) {
-          // Когда хост редактирует карту, его боец стоит спокойно без управления редактором
+        const pInput = (isLoc && !localPaused) ? input : (pl.input || { keys: {}, worldMouseX: pl.x + 60, worldMouseY: pl.y, lmb: false, rmb: false });
+        if (isLoc && localPaused) {
+          // Когда хост в редакторе или на паузе, его боец стоит спокойно без приёма локального ввода
           const rp = updateSinglePlayer(state, world, pl, { keys: {}, worldMouseX: pl.x + 60, worldMouseY: pl.y, lmb: false, rmb: false }, dt);
           if (rp) localRenderPos = rp;
         } else {
@@ -4651,6 +5024,25 @@
       updateShells(state, world, dt);
       updateParticles(state, world, dt);
       updateGunSmokeClouds(state, world, dt);
+
+      // Редкий лёгкий дымок над активными кострами (отсекается при выключении через requiresUnlock)
+      if (world && world.solids) {
+        for (let ci = 0; ci < world.solids.length; ci++) {
+          const cf = world.solids[ci];
+          if (cf.type !== 'campfire' || cf._storyHidden) continue;
+          cf._smokeTimer = (cf._smokeTimer || 0) - dt;
+          if (cf._smokeTimer <= 0) {
+            cf._smokeTimer = 0.42;
+            if (!state.viewRect || (cf.x + cf.w >= state.viewRect.x - 40 && cf.x <= state.viewRect.x + state.viewRect.w + 40 && cf.y + cf.h >= state.viewRect.y - 40 && cf.y <= state.viewRect.y + state.viewRect.h + 40)) {
+              spawnParticles(state, cf.x + cf.w * 0.5 + G.MATH.rand(-2, 2), cf.y + cf.h * 0.42, 1, {
+                baseAngle: -Math.PI * 0.5, spread: 0.45, minSpeed: 10, maxSpeed: 20,
+                minLife: 0.55, maxLife: 1.05, minSize: 1.5, maxSize: 2.6, grow: 2.2, drag: 1.4,
+                colors: ['#cfc8b6', '#a8a293'], alpha: 0.34, kind: 'smoke'
+              });
+            }
+          }
+        }
+      }
 
       // 3. Камера (следит за локальным игроком, если редактор не активен)
       if (!edActive && localP) {

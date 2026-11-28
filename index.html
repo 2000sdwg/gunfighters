@@ -9,15 +9,142 @@
 <body>
   <canvas id="game"></canvas>
 
+  <!-- Главное меню поверх живого мира -->
+  <div id="main-menu" class="menu-overlay">
+    <div id="menu-home" class="panel menu-card">
+      <div class="menu-title">ПОЛУДЕННЫЙ УЖАС</div>
+      <div class="menu-subtitle">ДИКИЙ ЗАПАД • ТАКТИЧЕСКИЙ ВЕСТЕРН</div>
+      <div class="menu-buttons-col">
+        <button id="btn-menu-story" class="btn-menu-main">СЮЖЕТ</button>
+        <button id="btn-menu-freeplay" class="btn-menu-main">СВОБОДНАЯ ИГРА</button>
+        <button id="btn-menu-editor" class="btn-menu-main">РЕДАКТОР КАРТ</button>
+        <button id="btn-menu-settings" class="btn-menu-main">НАСТРОЙКИ</button>
+        <button id="btn-menu-multiplayer" class="btn-menu-main">МУЛЬТИПЛЕЕР</button>
+      </div>
+      <div class="menu-footer-hint">WASD • ЛКМ огонь • ПКМ фокус/укрытие • [V] отладка FPS</div>
+    </div>
+
+    <!-- Подэкран выбора глав сюжета -->
+    <div id="story-screen" class="panel menu-card menu-subcard hidden">
+      <div class="menu-sub-header">
+        <span>СЮЖЕТНАЯ КАМПАНИЯ</span>
+        <button id="btn-story-back" class="btn-small">← Назад</button>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <span class="map-card-title">ГЛАВА 1: ХОЗЯИН САЛУНА</span>
+          <span class="badge">ПРЕВЬЮ • ЭТАП 4</span>
+        </div>
+        <div class="map-card-desc">Салун на краю каньона хранит старые долги. Осмотрите зал, подготовьте револьверы и испытайте превью-хаб перед выходом сюжетного движка.</div>
+        <div class="map-card-actions">
+          <button id="btn-story-ch1" class="btn-small active">Запустить салун-хаб (Превью)</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Подэкран свободной игры -->
+    <div id="maps-play-screen" class="panel menu-card menu-subcard hidden">
+      <div class="menu-sub-header">
+        <span>СВОБОДНАЯ ИГРА — ВЫБОР КАРТЫ</span>
+        <button id="btn-play-back" class="btn-small">← Назад</button>
+      </div>
+      <div class="map-card">
+        <div class="map-card-head">
+          <span class="map-card-title">Полуденный городок (Стандартная)</span>
+          <span class="badge">3360×960</span>
+        </div>
+        <div class="map-card-desc">Салун, широкая улица, загон с овцами, лошадь, масляные лампы и каньон с засадами.</div>
+        <div class="map-card-actions">
+          <button id="btn-play-default" class="btn-small active">ИГРАТЬ</button>
+        </div>
+      </div>
+      <div class="section-title">СОХРАНЁННЫЕ КАРТЫ БИБЛИОТЕКИ</div>
+      <div id="maps-play-list" class="maps-list"></div>
+    </div>
+
+    <!-- Подэкран редактора и библиотеки карт -->
+    <div id="maps-editor-screen" class="panel menu-card menu-subcard hidden">
+      <div class="menu-sub-header">
+        <span>РЕДАКТОР И БИБЛИОТЕКА КАРТ</span>
+        <button id="btn-editor-list-back" class="btn-small">← Назад</button>
+      </div>
+      <div class="section-title">СОЗДАТЬ НОВУЮ ЧИСТУЮ КАРТУ</div>
+      <div class="map-create-grid">
+        <label class="net-field">
+          <span>НАЗВАНИЕ КАРТЫ</span>
+          <input id="new-map-name" class="net-input" type="text" maxlength="32" value="Новая пустошь" />
+        </label>
+        <div class="net-row">
+          <label class="net-field">
+            <span>РАЗМЕР</span>
+            <select id="new-map-size" class="net-input">
+              <option value="small">Малая (1400×840)</option>
+              <option value="medium">Средняя (2200×900)</option>
+              <option value="large" selected>Большая (3360×960)</option>
+            </select>
+          </label>
+          <label class="net-field">
+            <span>БАЗОВЫЙ ГРУНТ</span>
+            <select id="new-map-terrain" class="net-input">
+              <option value="dirt" selected>Пыль</option>
+              <option value="canyon">Каньон</option>
+              <option value="grass">Степная трава</option>
+              <option value="wood">Деревянный пол</option>
+            </select>
+          </label>
+        </div>
+        <div class="net-row">
+          <button id="btn-create-blank-map" class="btn-small active">Создать и редактировать</button>
+          <button id="btn-edit-default-map" class="btn-small">Редактировать стандартную</button>
+          <button id="btn-import-map-json" class="btn-small">Импорт .json</button>
+          <input id="input-import-map" type="file" accept=".json" class="hidden" />
+        </div>
+      </div>
+      <div class="section-title">СОХРАНЁННЫЕ ПОЛЬЗОВАТЕЛЬСКИЕ КАРТЫ</div>
+      <div id="maps-editor-list" class="maps-list"></div>
+    </div>
+  </div>
+
+  <!-- Меню паузы (поверх замороженной игры) -->
+  <div id="pause-menu" class="menu-overlay hidden">
+    <div class="panel pause-card">
+      <div class="menu-title pause-title">ПАУЗА</div>
+      <div id="pause-map-label" class="menu-subtitle">Полуденный городок (Стандартная)</div>
+      <div class="menu-buttons-col">
+        <button id="btn-pause-resume" class="btn-menu-main">Продолжить</button>
+        <button id="btn-pause-settings" class="btn-menu-main">Настройки</button>
+        <button id="btn-pause-restart" class="btn-menu-main">Перезапустить карту</button>
+        <button id="btn-pause-editor" class="btn-menu-main">В редактор карты</button>
+        <button id="btn-pause-mainmenu" class="btn-menu-main">В главное меню</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Компактное подтверждение выхода из редактора по Esc -->
+  <div id="editor-exit-modal" class="menu-overlay hidden">
+    <div class="panel pause-card">
+      <div class="menu-title pause-title">ВЫХОД ИЗ РЕДАКТОРА</div>
+      <div class="menu-subtitle">Сохранить изменения перед выходом?</div>
+      <div class="menu-buttons-col">
+        <button id="btn-ed-exit-resume" class="btn-menu-main">Вернуться в редактор</button>
+        <button id="btn-ed-exit-save-menu" class="btn-menu-main">Сохранить и в главное меню</button>
+        <button id="btn-ed-exit-menu" class="btn-menu-main btn-warn">В главное меню без сохранения</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Верхний правый угол: сеть, редактор и кнопка настроек -->
   <div id="hud-top-right">
-    <div class="top-actions-row">
+    <div class="top-actions-row" id="top-actions-row">
       <button id="btn-network" class="btn-toggle" title="Мультиплеер (WebRTC P2P)">🌐 СЕТЬ</button>
       <button id="btn-editor" class="btn-toggle" title="Редактор уровня">⚒ РЕДАКТОР</button>
       <button id="btn-settings" class="btn-toggle" title="Физика, звук и управление">⚙</button>
     </div>
     <div id="network-panel" class="panel hidden">
-      <div class="section-title">СЕТЕВАЯ ИГРА (WEBRTC P2P)</div>
+      <div class="panel-close-head">
+        <span class="section-title">СЕТЕВАЯ ИГРА (WEBRTC P2P)</span>
+        <button id="btn-close-network" class="btn-small btn-close-x">✕</button>
+      </div>
       <label class="net-field">
         <span>ИМЯ БОЙЦА</span>
         <input id="net-name" class="net-input" type="text" maxlength="18" value="СТРЕЛОК" />
@@ -52,26 +179,57 @@
       <button id="btn-net-disconnect" class="btn-small btn-warn hidden">Отключиться от комнаты</button>
     </div>
     <div id="editor-panel" class="panel hidden">
-      <div class="section-title">РЕДАКТОР УРОВНЯ (СЕТКА 8 PX)</div>
+      <div class="editor-head-row">
+        <div class="section-title">РЕДАКТОР УРОВНЯ (СЕТКА 4 PX)</div>
+        <span id="editor-map-name" class="editor-map-badge">Стандартная</span>
+      </div>
       <div class="editor-tools-row">
         <button id="btn-editor-place" class="btn-small active">Поставить</button>
+        <button id="btn-editor-move" class="btn-small">Двигать [M]</button>
         <button id="btn-editor-rotate" class="btn-small">Повернуть [Q]</button>
         <button id="btn-editor-erase" class="btn-small">Удалить [X]</button>
       </div>
       <div class="editor-tabs-row">
-        <button id="btn-editor-tab-objects" class="btn-small active">Предметы</button>
-        <button id="btn-editor-tab-npc" class="btn-small">NPC</button>
+        <button id="btn-editor-tab-terrain" class="btn-small">ПОЛ</button>
+        <button id="btn-editor-tab-buildings" class="btn-small">ПОСТРОЙКИ</button>
+        <button id="btn-editor-tab-objects" class="btn-small active">ПРЕДМЕТЫ</button>
+        <button id="btn-editor-tab-npc" class="btn-small">NPC и ЗОНЫ</button>
+      </div>
+      <div id="editor-terrain-controls" class="editor-brush-row hidden">
+        <span>РАЗМЕР КИСТИ</span>
+        <button id="btn-editor-brush-size" class="btn-small">1×1 (32×32)</button>
       </div>
       <div id="editor-palette" class="editor-palette"></div>
-      <div class="editor-hint">WASD камера • ЛКМ действие • ПКМ удалить</div>
+      <div id="editor-inspector" class="editor-inspector">
+        <div class="editor-inspector-head">
+          <span>СВОЙСТВА (ДЛЯ СЮЖЕТА)</span>
+          <span id="editor-inspector-target" class="editor-inspector-target">Новый объект</span>
+        </div>
+        <label class="editor-prop-row">
+          <span>ID / Тег</span>
+          <input id="editor-prop-tag" class="net-input" type="text" maxlength="32" placeholder="stranger_1, exit_east..." />
+        </label>
+        <label class="editor-prop-row">
+          <span>Награда</span>
+          <input id="editor-prop-unlock" class="net-input" type="text" maxlength="32" placeholder="requiresUnlock..." />
+        </label>
+      </div>
+      <div class="editor-hint">WASD камера • ЛКМ/ПКМ • Alt 1px • [M] Двигать</div>
       <div class="bind-actions">
-        <button id="btn-editor-save" class="btn-small">Сохранить</button>
-        <button id="btn-editor-copy" class="btn-small">Скопировать JSON</button>
+        <button id="btn-editor-save" class="btn-small active">Сохранить</button>
+        <button id="btn-editor-save-as" class="btn-small">Сохранить как...</button>
+        <button id="btn-editor-play-test" class="btn-small">Тест / Играть</button>
+      </div>
+      <div class="bind-actions">
+        <button id="btn-editor-copy" class="btn-small">Экспорт .json</button>
         <button id="btn-editor-reset" class="btn-small btn-warn">Сбросить карту</button>
       </div>
     </div>
     <div id="settings-panel" class="panel hidden">
-      <div class="section-title">ФИЗИКА И ЗВУК</div>
+      <div class="panel-close-head">
+        <span class="section-title">ФИЗИКА И ЗВУК</span>
+        <button id="btn-close-settings" class="btn-small btn-close-x">✕</button>
+      </div>
       <label class="slider-row">
         <span>Инерция ствола</span>
         <input type="range" id="sl-inertia" min="0.4" max="2.0" step="0.05" value="1.0" />

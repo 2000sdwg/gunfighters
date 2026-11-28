@@ -58,15 +58,66 @@
     bleedBadge: document.getElementById('bleed-badge'),
     btnEditor: document.getElementById('btn-editor'),
     editorPanel: document.getElementById('editor-panel'),
+    editorMapName: document.getElementById('editor-map-name'),
     btnEditorPlace: document.getElementById('btn-editor-place'),
+    btnEditorMove: document.getElementById('btn-editor-move'),
     btnEditorRotate: document.getElementById('btn-editor-rotate'),
     btnEditorErase: document.getElementById('btn-editor-erase'),
+    btnEditorTabTerrain: document.getElementById('btn-editor-tab-terrain'),
+    btnEditorTabBuildings: document.getElementById('btn-editor-tab-buildings'),
     btnEditorTabObjects: document.getElementById('btn-editor-tab-objects'),
     btnEditorTabNpc: document.getElementById('btn-editor-tab-npc'),
+    editorTerrainControls: document.getElementById('editor-terrain-controls'),
+    btnEditorBrushSize: document.getElementById('btn-editor-brush-size'),
     editorPalette: document.getElementById('editor-palette'),
+    editorInspector: document.getElementById('editor-inspector'),
+    editorInspectorTarget: document.getElementById('editor-inspector-target'),
+    editorPropTag: document.getElementById('editor-prop-tag'),
+    editorPropUnlock: document.getElementById('editor-prop-unlock'),
     btnEditorSave: document.getElementById('btn-editor-save'),
+    btnEditorSaveAs: document.getElementById('btn-editor-save-as'),
+    btnEditorPlayTest: document.getElementById('btn-editor-play-test'),
     btnEditorCopy: document.getElementById('btn-editor-copy'),
     btnEditorReset: document.getElementById('btn-editor-reset'),
+    topActionsRow: document.getElementById('top-actions-row'),
+    hudBottomLeft: document.getElementById('hud-bottom-left'),
+    btnCloseSettings: document.getElementById('btn-close-settings'),
+    btnCloseNetwork: document.getElementById('btn-close-network'),
+    mainMenu: document.getElementById('main-menu'),
+    menuHome: document.getElementById('menu-home'),
+    storyScreen: document.getElementById('story-screen'),
+    mapsPlayScreen: document.getElementById('maps-play-screen'),
+    mapsEditorScreen: document.getElementById('maps-editor-screen'),
+    btnMenuStory: document.getElementById('btn-menu-story'),
+    btnMenuFreeplay: document.getElementById('btn-menu-freeplay'),
+    btnMenuEditor: document.getElementById('btn-menu-editor'),
+    btnMenuSettings: document.getElementById('btn-menu-settings'),
+    btnMenuMultiplayer: document.getElementById('btn-menu-multiplayer'),
+    btnStoryBack: document.getElementById('btn-story-back'),
+    btnStoryCh1: document.getElementById('btn-story-ch1'),
+    btnPlayBack: document.getElementById('btn-play-back'),
+    btnPlayDefault: document.getElementById('btn-play-default'),
+    mapsPlayList: document.getElementById('maps-play-list'),
+    btnEditorListBack: document.getElementById('btn-editor-list-back'),
+    newMapName: document.getElementById('new-map-name'),
+    newMapSize: document.getElementById('new-map-size'),
+    newMapTerrain: document.getElementById('new-map-terrain'),
+    btnCreateBlankMap: document.getElementById('btn-create-blank-map'),
+    btnEditDefaultMap: document.getElementById('btn-edit-default-map'),
+    btnImportMapJson: document.getElementById('btn-import-map-json'),
+    inputImportMap: document.getElementById('input-import-map'),
+    mapsEditorList: document.getElementById('maps-editor-list'),
+    pauseMenu: document.getElementById('pause-menu'),
+    pauseMapLabel: document.getElementById('pause-map-label'),
+    btnPauseResume: document.getElementById('btn-pause-resume'),
+    btnPauseSettings: document.getElementById('btn-pause-settings'),
+    btnPauseRestart: document.getElementById('btn-pause-restart'),
+    btnPauseEditor: document.getElementById('btn-pause-editor'),
+    btnPauseMainmenu: document.getElementById('btn-pause-mainmenu'),
+    editorExitModal: document.getElementById('editor-exit-modal'),
+    btnEdExitResume: document.getElementById('btn-ed-exit-resume'),
+    btnEdExitSaveMenu: document.getElementById('btn-ed-exit-save-menu'),
+    btnEdExitMenu: document.getElementById('btn-ed-exit-menu'),
     btnNetwork: document.getElementById('btn-network'),
     networkPanel: document.getElementById('network-panel'),
     netName: document.getElementById('net-name'),
@@ -1238,18 +1289,114 @@
     return pal[0] || { category: 'objects', kind: 'solid', type: 'crate', label: 'Ящик', w: 34, h: 32, mat: 'wood', high: false, rotatable: false };
   }
 
-  function getEditorPlaceBox() {
+  function isPointEditorTpl(tpl) {
+    const k = (tpl && tpl.kind) || 'solid';
+    return k !== 'solid' && k !== 'zone' && k !== 'door_pair' && k !== 'tile';
+  }
+
+  function getEditorSnapStep(evAlt) {
+    const ed = state && state.editor;
+    const altHeld = !!(evAlt || (state && state.input && state.input.keys && (state.input.keys.AltLeft || state.input.keys.AltRight)));
+    if (altHeld) return 1;
+    return (ed && ed.gridStep) || 4;
+  }
+
+  function getEditorPlaceBox(evAlt) {
     const ed = state && state.editor;
     if (!ed) return null;
     const tpl = getEditorTpl(ed.selectedType);
-    const rot = !!(ed.rotated && tpl.rotatable);
-    const w = rot ? tpl.h : tpl.w;
-    const h = rot ? tpl.w : tpl.h;
     const wm = screenToWorld(state.input.mouseX, state.input.mouseY);
-    const step = ed.gridStep || 8;
-    const x = G.MATH.clamp(Math.round((wm.x - w * 0.5) / step) * step, 8, world.width - w - 8);
-    const y = G.MATH.clamp(Math.round((wm.y - h * 0.5) / step) * step, 8, world.height - h - 8);
-    return { tpl, x, y, cx: Math.round(x + w * 0.5), cy: Math.round(y + h * 0.5), w, h, wm };
+    if (tpl.kind === 'tile') {
+      const bs = (ed.brushSize || 1) === 2 ? 2 : 1;
+      const tx = Math.floor(wm.x / 32);
+      const ty = Math.floor(wm.y / 32);
+      const px = G.MATH.clamp(tx * 32, 0, Math.max(0, world.width - 32));
+      const py = G.MATH.clamp(ty * 32, 0, Math.max(0, world.height - 32));
+      const bw = Math.min(bs * 32, world.width - px);
+      const bh = Math.min(bs * 32, world.height - py);
+      return { tpl, x: px, y: py, cx: px + Math.round(bw * 0.5), cy: py + Math.round(bh * 0.5), w: bw, h: bh, wm, tx, ty, brushSize: bs };
+    }
+    const rot = !!(ed.rotated && tpl.rotatable);
+    let w = rot ? tpl.h : tpl.w;
+    let h = rot ? tpl.w : tpl.h;
+    if (tpl.kind === 'zone' && rot) {
+      w = 96;
+      h = 64;
+    }
+    const step = getEditorSnapStep(evAlt);
+    if (isPointEditorTpl(tpl)) {
+      const cx = G.MATH.clamp(Math.round(wm.x / step) * step, 8, world.width - 8);
+      const cy = G.MATH.clamp(Math.round(wm.y / step) * step, 8, world.height - 8);
+      return { tpl, x: Math.round(cx - w * 0.5), y: Math.round(cy - h * 0.5), cx, cy, w, h, wm, rot };
+    }
+    const x = G.MATH.clamp(Math.round((wm.x - w * 0.5) / step) * step, 4, world.width - w - 4);
+    const y = G.MATH.clamp(Math.round((wm.y - h * 0.5) / step) * step, 4, world.height - h - 4);
+    return { tpl, x, y, cx: Math.round(x + w * 0.5), cy: Math.round(y + h * 0.5), w, h, wm, rot };
+  }
+
+  function getEntityTagValue(hit) {
+    if (!hit || !hit.obj) return '';
+    if (hit.kind === 'door_pair' && Array.isArray(hit.obj)) {
+      return (hit.obj[0] && hit.obj[0].tagId) || '';
+    }
+    if (hit.kind === 'zone') return hit.obj.zoneId || hit.obj.tagId || '';
+    if (hit.kind === 'civilian' || hit.kind === 'target') return hit.obj.npcId || hit.obj.tagId || '';
+    return hit.obj.tagId || '';
+  }
+
+  function setEntityTagValue(hit, rawVal) {
+    if (!hit || !hit.obj) return;
+    const val = String(rawVal || '').trim().slice(0, 32);
+    if (hit.kind === 'door_pair' && Array.isArray(hit.obj)) {
+      for (let i = 0; i < hit.obj.length; i++) hit.obj[i].tagId = val;
+      return;
+    }
+    if (hit.kind === 'zone') {
+      hit.obj.zoneId = val;
+      hit.obj.tagId = val;
+      return;
+    }
+    if (hit.kind === 'civilian' || hit.kind === 'target') {
+      hit.obj.npcId = val;
+      hit.obj.tagId = val;
+      return;
+    }
+    hit.obj.tagId = val;
+  }
+
+  function getEntityUnlockValue(hit) {
+    if (!hit || !hit.obj) return '';
+    if (hit.kind === 'door_pair' && Array.isArray(hit.obj)) {
+      return (hit.obj[0] && hit.obj[0].requiresUnlock) || '';
+    }
+    return hit.obj.requiresUnlock || '';
+  }
+
+  function setEntityUnlockValue(hit, rawVal) {
+    if (!hit || !hit.obj) return;
+    const val = String(rawVal || '').trim().slice(0, 32);
+    if (hit.kind === 'door_pair' && Array.isArray(hit.obj)) {
+      for (let i = 0; i < hit.obj.length; i++) hit.obj[i].requiresUnlock = val;
+      return;
+    }
+    hit.obj.requiresUnlock = val;
+  }
+
+  function syncEditorInspectorDOM() {
+    const ed = state && state.editor;
+    if (!ed) return;
+    const sel = ed.selectedEntity;
+    if (ui.editorInspectorTarget) {
+      ui.editorInspectorTarget.textContent = sel ? (`Выбр: ${sel.label || sel.kind}`) : 'Новый объект';
+    }
+    if (ui.editorPropTag) {
+      ui.editorPropTag.disabled = !!(sel && sel.kind === 'spawn');
+      ui.editorPropTag.value = sel ? getEntityTagValue(sel) : (ed.pendingTagId || '');
+    }
+    if (ui.editorPropUnlock) {
+      ui.editorPropUnlock.disabled = !!(sel && sel.kind === 'spawn');
+      ui.editorPropUnlock.value = sel ? getEntityUnlockValue(sel) : (ed.pendingRequiresUnlock || '');
+    }
   }
 
   function buildEditorPaletteDOM() {
@@ -1273,14 +1420,23 @@
       lblSpan.textContent = item.label;
       const szSpan = document.createElement('span');
       szSpan.className = 'editor-item-size';
-      szSpan.textContent = item.category === 'npc' ? 'NPC' : `${item.w}×${item.h}`;
+      if (item.category === 'npc') {
+        szSpan.textContent = item.kind === 'zone' ? `${item.w}×${item.h}` : (item.kind === 'spawn' ? 'ТОЧКА' : 'NPC');
+      } else if (item.category === 'terrain') {
+        szSpan.textContent = '32×32';
+      } else {
+        szSpan.textContent = `${item.w}×${item.h}`;
+      }
       btn.appendChild(lblSpan);
       btn.appendChild(szSpan);
       btn.addEventListener('click', () => {
         if (!state || !state.editor) return;
         state.editor.selectedType = item.type;
         state.editor.tool = 'place';
+        state.editor.selectedEntity = null;
+        syncEditorInspectorDOM();
         lastEditorKey = '';
+        updateEditorUI();
       });
       ui.editorPalette.appendChild(btn);
     }
@@ -1296,9 +1452,47 @@
       e.preventDefault();
     });
 
+    function paintTerrainBrushAt(wmX, wmY, forceErase, eAlt) {
+      if (!world || !world.paintTerrainTile || !state || !state.editor) return false;
+      const ed = state.editor;
+      const tpl = getEditorTpl(ed.selectedType);
+      const tType = forceErase ? 'erase_tile' : (tpl.tileType || 'dirt');
+      const bs = forceErase ? 1 : ((ed.brushSize || 1) === 2 ? 2 : 1);
+      const tx0 = Math.floor(wmX / 32);
+      const ty0 = Math.floor(wmY / 32);
+      let painted = false;
+      for (let dy = 0; dy < bs; dy++) {
+        for (let dx = 0; dx < bs; dx++) {
+          if (world.paintTerrainTile(tx0 + dx, ty0 + dy, tType)) painted = true;
+        }
+      }
+      if (painted) ed._terrainDirty = true;
+      return painted;
+    }
+
     window.addEventListener('mousemove', (e) => {
       state.input.mouseX = e.clientX;
       state.input.mouseY = e.clientY;
+      const ed = state && state.editor;
+      if (!ed || !ed.active || !world) return;
+      const wm = screenToWorld(e.clientX, e.clientY);
+      if (ed._dragging && ed.selectedEntity && world.moveEditorEntity) {
+        const step = getEditorSnapStep(e.altKey);
+        const hit = ed.selectedEntity;
+        let nx, ny;
+        if (hit.kind === 'solid' || hit.kind === 'zone' || hit.kind === 'door_pair') {
+          nx = Math.round((wm.x - (ed._dragOffX || 0)) / step) * step;
+          ny = Math.round((wm.y - (ed._dragOffY || 0)) / step) * step;
+        } else {
+          nx = Math.round((wm.x - (ed._dragOffX || 0)) / step) * step;
+          ny = Math.round((wm.y - (ed._dragOffY || 0)) / step) * step;
+        }
+        world.moveEditorEntity(hit, nx, ny, state);
+        return;
+      }
+      if (ed.tab === 'terrain' && (state.input.lmb || state.input.rmb) && !isPointerOverUI(e.target)) {
+        paintTerrainBrushAt(wm.x, wm.y, !!state.input.rmb, e.altKey);
+      }
     });
 
     function isClientNet() {
@@ -1377,9 +1571,261 @@
       }
     }
 
+    function showMenuSubscreen(sub) {
+      if (ui.menuHome) ui.menuHome.classList.toggle('hidden', sub !== 'home');
+      if (ui.storyScreen) ui.storyScreen.classList.toggle('hidden', sub !== 'story');
+      if (ui.mapsPlayScreen) ui.mapsPlayScreen.classList.toggle('hidden', sub !== 'play');
+      if (ui.mapsEditorScreen) ui.mapsEditorScreen.classList.toggle('hidden', sub !== 'editor');
+      if (sub === 'play' || sub === 'editor') renderMapsLibraryUI();
+    }
+
+    function setScreen(nextScreen) {
+      if (!state) return;
+      const scr = nextScreen || 'playing';
+      state.screen = scr;
+      if (state.editor) {
+        state.editor.active = (scr === 'editor');
+        if (scr === 'editor') {
+          state.editor.camX = state.camera.x;
+          state.editor.camY = state.camera.y;
+        } else {
+          state.editor.hoverSolidId = null;
+          state.editor.hoverEntity = null;
+          state.editor._dragging = false;
+        }
+      }
+      if (world && world.rebuildStoryVisibility) {
+        world.rebuildStoryVisibility(state);
+      }
+      if (scr === 'menu' || scr === 'paused') {
+        state.input.lmb = false;
+        state.input.rmb = false;
+        state.input.keys = {};
+        state.hatMenuOpen = false;
+        if (G.AUDIO.setConcussion) G.AUDIO.setConcussion(0);
+        if (G.AUDIO.updateWind) G.AUDIO.updateWind(0, false, state.time || 0);
+      }
+      if (typeof document !== 'undefined' && document.body && document.body.classList) {
+        document.body.classList.remove('screen-menu', 'screen-playing', 'screen-paused', 'screen-editor');
+        document.body.classList.add('screen-' + scr);
+      }
+      if (ui.mainMenu) ui.mainMenu.classList.toggle('hidden', scr !== 'menu');
+      if (ui.pauseMenu) ui.pauseMenu.classList.toggle('hidden', scr !== 'paused');
+      if (ui.editorExitModal) ui.editorExitModal.classList.add('hidden');
+      if (ui.hudBottomLeft) ui.hudBottomLeft.classList.toggle('hidden', scr === 'menu' || scr === 'paused');
+      if (ui.topActionsRow) ui.topActionsRow.classList.toggle('hidden', scr === 'menu' || scr === 'paused');
+      if (ui.pauseMapLabel) ui.pauseMapLabel.textContent = state.currentMapName || 'Полуденный городок (Стандартная)';
+      if (ui.btnPauseEditor) ui.btnPauseEditor.classList.toggle('hidden', state.netRole === 'client');
+      if (scr === 'menu') {
+        showMenuSubscreen('home');
+      } else {
+        if (ui.settingsPanel) ui.settingsPanel.classList.add('hidden');
+        if (ui.networkPanel) ui.networkPanel.classList.add('hidden');
+      }
+      lastEditorKey = '';
+      updateEditorUI();
+    }
+
+    function loadMapIntoGame(mapData, targetScreen, opts) {
+      const targetMeta = mapData || { id: 'default', name: 'Полуденный городок (Стандартная)' };
+      state.storyMode = !!(opts && opts.storyMode);
+      world = G.WORLD.create(mapData || null);
+      if (G.SIM && G.SIM.resetTransientState) {
+        G.SIM.resetTransientState(state, world);
+      }
+      state.currentMapId = (world.mapMeta && world.mapMeta.id) || targetMeta.id || 'default';
+      state.currentMapName = (world.mapMeta && world.mapMeta.name) || targetMeta.name || 'Полуденный городок (Стандартная)';
+      if (state.editor) {
+        state.editor.selectedEntity = null;
+        state.editor._dragging = false;
+      }
+      if (G.NET && G.NET.broadcastMapSync && state.netRole === 'host') {
+        G.NET.broadcastMapSync(state, world);
+      }
+      setScreen(targetScreen || 'playing');
+      syncEditorInspectorDOM();
+      G.SIM.showToast(state, `КАРТА: ${state.currentMapName.toUpperCase()}`, 1.4);
+      updateHUD();
+    }
+
+    function downloadMapJson(mapObj) {
+      if (!G.MAPS) return;
+      const json = G.MAPS.exportJson(mapObj);
+      G.lastExportedMapJson = json;
+      const safeName = String((mapObj && mapObj.name) || 'map').replace(/[^\wа-яА-ЯёЁ\-]+/g, '_').slice(0, 32) || 'map';
+      try {
+        if (typeof Blob !== 'undefined' && typeof URL !== 'undefined' && URL.createObjectURL) {
+          const blob = new Blob([json], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${safeName}.json`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          G.SIM.showToast(state, `ЭКСПОРТ: ${safeName}.json`, 1.3);
+          return;
+        }
+      } catch (_) {}
+      copyTextToClipboard(json, 'JSON КАРТЫ СКОПИРОВАН В БУФЕР', 'JSON ПОДГОТОВЛЕН (G.lastExportedMapJson)');
+    }
+
+    function formatTerrainLabel(baseTerrain) {
+      if (baseTerrain === 'canyon') return 'Каньон';
+      if (baseTerrain === 'grass') return 'Степная трава';
+      if (baseTerrain === 'wood') return 'Деревянный пол';
+      return 'Пыль';
+    }
+
+    function renderMapsLibraryUI() {
+      if (!G.MAPS) return;
+      const list = G.MAPS.list();
+      if (ui.mapsPlayList) {
+        ui.mapsPlayList.innerHTML = '';
+        if (!list.length) {
+          const emp = document.createElement('div');
+          emp.className = 'maps-empty';
+          emp.textContent = 'Библиотека пуста. Создайте новую карту в «Редакторе карт».';
+          ui.mapsPlayList.appendChild(emp);
+        } else {
+          for (let i = 0; i < list.length; i++) {
+            const m = list[i];
+            const card = document.createElement('div');
+            card.className = 'map-card';
+            const head = document.createElement('div');
+            head.className = 'map-card-head';
+            const t = document.createElement('span');
+            t.className = 'map-card-title';
+            t.textContent = m.name;
+            const b = document.createElement('span');
+            b.className = 'badge';
+            b.textContent = `${m.width}×${m.height}`;
+            head.appendChild(t);
+            head.appendChild(b);
+            const desc = document.createElement('div');
+            desc.className = 'map-card-desc';
+            desc.textContent = `${m.isBlank ? 'Чистая карта' : 'Копия городка'} • ${formatTerrainLabel(m.baseTerrain)} • Объектов: ${(m.solids || []).length}`;
+            const acts = document.createElement('div');
+            acts.className = 'map-card-actions';
+            const btnPlay = document.createElement('button');
+            btnPlay.className = 'btn-small active';
+            btnPlay.textContent = 'ИГРАТЬ';
+            btnPlay.addEventListener('click', () => loadMapIntoGame(G.MAPS.get(m.id) || m, 'playing'));
+            acts.appendChild(btnPlay);
+            card.appendChild(head);
+            card.appendChild(desc);
+            card.appendChild(acts);
+            ui.mapsPlayList.appendChild(card);
+          }
+        }
+      }
+
+      if (ui.mapsEditorList) {
+        ui.mapsEditorList.innerHTML = '';
+        if (!list.length) {
+          const emp = document.createElement('div');
+          emp.className = 'maps-empty';
+          emp.textContent = 'Сохранённых карт пока нет. Создайте чистую карту выше или импортируйте .json.';
+          ui.mapsEditorList.appendChild(emp);
+        } else {
+          for (let i = 0; i < list.length; i++) {
+            const m = list[i];
+            const card = document.createElement('div');
+            card.className = 'map-card';
+            const head = document.createElement('div');
+            head.className = 'map-card-head';
+            const t = document.createElement('span');
+            t.className = 'map-card-title';
+            t.textContent = m.name;
+            const b = document.createElement('span');
+            b.className = 'badge';
+            b.textContent = `${m.width}×${m.height}`;
+            head.appendChild(t);
+            head.appendChild(b);
+            const desc = document.createElement('div');
+            desc.className = 'map-card-desc';
+            desc.textContent = `${m.isBlank ? 'Чистая' : 'Стандартная (копия)'} • ${formatTerrainLabel(m.baseTerrain)}`;
+            const acts = document.createElement('div');
+            acts.className = 'map-card-actions';
+
+            const btnEd = document.createElement('button');
+            btnEd.className = 'btn-small active';
+            btnEd.textContent = 'Редактировать';
+            btnEd.addEventListener('click', () => loadMapIntoGame(G.MAPS.get(m.id) || m, 'editor'));
+
+            const btnPl = document.createElement('button');
+            btnPl.className = 'btn-small';
+            btnPl.textContent = 'Играть';
+            btnPl.addEventListener('click', () => loadMapIntoGame(G.MAPS.get(m.id) || m, 'playing'));
+
+            const btnEx = document.createElement('button');
+            btnEx.className = 'btn-small';
+            btnEx.textContent = 'Экспорт .json';
+            btnEx.addEventListener('click', () => downloadMapJson(G.MAPS.get(m.id) || m));
+
+            const btnDel = document.createElement('button');
+            btnDel.className = 'btn-small btn-warn';
+            btnDel.textContent = 'Удалить';
+            btnDel.addEventListener('click', () => {
+              G.MAPS.remove(m.id);
+              renderMapsLibraryUI();
+              G.SIM.showToast(state, `УДАЛЕНО: ${m.name.toUpperCase()}`, 1.1);
+            });
+
+            acts.appendChild(btnEd);
+            acts.appendChild(btnPl);
+            acts.appendChild(btnEx);
+            acts.appendChild(btnDel);
+            card.appendChild(head);
+            card.appendChild(desc);
+            card.appendChild(acts);
+            ui.mapsEditorList.appendChild(card);
+          }
+        }
+      }
+    }
+
+    function saveCurrentEditorMap(forceSaveAs) {
+      if (!world || !world.saveCustomMap) return false;
+      const isDefault = !world.mapMeta || world.mapMeta.id === 'default';
+      let nameToSave = null;
+      if (forceSaveAs || isDefault) {
+        const suggested = isDefault ? 'Моя копия городка' : (world.mapMeta.name + ' (копия)');
+        const entered = (typeof window !== 'undefined' && typeof window.prompt === 'function')
+          ? window.prompt('Введите название карты:', suggested)
+          : suggested;
+        if (entered === null) return false;
+        nameToSave = String(entered || suggested).trim().slice(0, 48) || suggested;
+        if (forceSaveAs && world.mapMeta) world.mapMeta.id = 'map_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 900 + 100);
+      }
+      const saved = world.saveCustomMap(nameToSave);
+      if (saved && world.mapMeta) {
+        state.currentMapId = world.mapMeta.id;
+        state.currentMapName = world.mapMeta.name;
+        lastEditorKey = '';
+        updateEditorUI();
+        renderMapsLibraryUI();
+        G.SIM.showToast(state, `СОХРАНЕНО: ${world.mapMeta.name.toUpperCase()}`, 1.4);
+        return true;
+      }
+      G.SIM.showToast(state, 'ОШИБКА СОХРАНЕНИЯ КАРТЫ', 1.4);
+      return false;
+    }
+
+    G.UI = {
+      setScreen,
+      showMenuSubscreen,
+      loadMapIntoGame,
+      renderMapsLibraryUI,
+      getState: () => state,
+      getWorld: () => world
+    };
+
     window.addEventListener('mousedown', (e) => {
       G.AUDIO.unlock();
       if (isPointerOverUI(e.target)) return;
+      if (state.screen === 'menu' || state.screen === 'paused') return;
 
       // Обработка кликов в режиме Редактора уровня (только оффлайн или хост)
       if (state.editor && state.editor.active) {
@@ -1387,54 +1833,144 @@
           G.SIM.toggleEditorMode(state, world, false);
           return;
         }
+        const ed = state.editor;
         const wm = screenToWorld(e.clientX, e.clientY);
-        if (e.button === 2 || state.editor.tool === 'erase') {
+
+        // Вкладка ПОЛ: ЛКМ рисует кистью 32x32 / 64x64, ПКМ стирает
+        if (ed.tab === 'terrain') {
+          if (e.button === 0) {
+            state.input.lmb = true;
+            paintTerrainBrushAt(wm.x, wm.y, ed.selectedType === 'tile_erase', e.altKey);
+          } else if (e.button === 2) {
+            state.input.rmb = true;
+            paintTerrainBrushAt(wm.x, wm.y, true, e.altKey);
+          }
+          return;
+        }
+
+        if (e.button === 2 || ed.tool === 'erase') {
           const hit = world.findEditorEntityAt ? world.findEditorEntityAt(wm.x, wm.y) : null;
           if (hit && world.removeEditorEntity && world.removeEditorEntity(hit, state)) {
+            if (ed.selectedEntity && ed.selectedEntity.obj === hit.obj) ed.selectedEntity = null;
+            syncEditorInspectorDOM();
             if (G.NET && G.NET.broadcastMapSync) G.NET.broadcastMapSync(state, world);
             G.SIM.showToast(state, `УДАЛЕНО: ${String(hit.label || hit.kind).toUpperCase()}`, 0.9);
           }
           return;
         }
-        if (e.button === 0 && state.editor.tool === 'place') {
-          const box = getEditorPlaceBox();
+
+        if (e.button === 0 && ed.tool === 'move') {
+          const hit = world.findEditorEntityAt ? world.findEditorEntityAt(wm.x, wm.y) : null;
+          ed.selectedEntity = hit || null;
+          syncEditorInspectorDOM();
+          lastEditorKey = '';
+          if (hit && hit.obj) {
+            ed._dragging = true;
+            if (hit.kind === 'solid' || hit.kind === 'zone' || hit.kind === 'door_pair') {
+              ed._dragOffX = wm.x - hit.x;
+              ed._dragOffY = wm.y - hit.y;
+            } else {
+              ed._dragOffX = wm.x - hit.obj.x;
+              ed._dragOffY = wm.y - hit.obj.y;
+            }
+          } else {
+            ed._dragging = false;
+          }
+          return;
+        }
+
+        if (e.button === 0 && ed.tool === 'place') {
+          const box = getEditorPlaceBox(e.altKey);
           if (box) {
             const knd = box.tpl.kind || 'solid';
-            let placed = false;
+            const tagId = String(ed.pendingTagId || '').trim();
+            const reqUnlock = String(ed.pendingRequiresUnlock || '').trim();
+            let createdObj = null;
+            let createdKind = knd;
             if (knd === 'solid' && world.addEditorSolid) {
-              world.addEditorSolid({
+              createdObj = world.addEditorSolid({
                 x: box.x,
                 y: box.y,
                 w: box.w,
                 h: box.h,
                 mat: box.tpl.mat,
-                type: box.tpl.type,
+                type: box.tpl.solidType || box.tpl.type,
+                solidType: box.tpl.solidType,
                 high: box.tpl.high,
-                isCover: true,
+                rotated: !!box.rot,
+                isCover: box.tpl.isCover,
+                passThroughBullets: box.tpl.passThroughBullets,
+                walkThrough: box.tpl.walkThrough,
                 isHitchingPost: !!box.tpl.isHitchingPost,
-                interior: !!box.tpl.interior
+                interior: !!box.tpl.interior,
+                wallPalKey: box.tpl.wallPalKey,
+                roofPalKey: box.tpl.roofPalKey,
+                roofStyle: box.tpl.roofStyle,
+                signText: box.tpl.signText,
+                buildingType: box.tpl.buildingType,
+                chimney: !!box.tpl.chimney,
+                tagId,
+                requiresUnlock: reqUnlock
               });
-              placed = true;
+            } else if (knd === 'door_pair' && world.addEditorDoorPair) {
+              createdObj = world.addEditorDoorPair(box.x, box.y, box.w, box.h, { tagId, requiresUnlock: reqUnlock });
+            } else if (knd === 'interactable' && world.addEditorInteractable) {
+              createdObj = world.addEditorInteractable(box.tpl.intKind || box.tpl.type, box.cx, box.cy, {
+                intLabel: box.tpl.intLabel, r: box.tpl.r || 44, tagId, requiresUnlock: reqUnlock
+              });
             } else if (knd === 'tree' && world.addEditorTree) {
-              world.addEditorTree(box.cx, box.cy, box.tpl.r || 22);
-              placed = true;
+              createdObj = world.addEditorTree(box.cx, box.cy, box.tpl.r || 22);
+              if (createdObj) { createdObj.tagId = tagId; createdObj.requiresUnlock = reqUnlock; }
             } else if (knd === 'pole' && world.addEditorPole) {
-              world.addEditorPole(box.cx, box.cy);
-              placed = true;
+              createdObj = world.addEditorPole(box.cx, box.cy);
+              if (createdObj) { createdObj.tagId = tagId; createdObj.requiresUnlock = reqUnlock; }
             } else if (knd === 'bottle' && world.addEditorBottle) {
-              world.addEditorBottle(box.cx, box.cy);
-              placed = true;
+              createdObj = world.addEditorBottle(box.cx, box.cy);
+              if (createdObj) { createdObj.tagId = tagId; createdObj.requiresUnlock = reqUnlock; }
+              createdKind = 'target';
             } else if (knd === 'bandit' && world.addEditorBandit) {
-              world.addEditorBandit(box.cx, box.cy, box.tpl);
-              placed = true;
+              createdObj = world.addEditorBandit(box.cx, box.cy, box.tpl);
+              if (createdObj) { createdObj.npcId = tagId; createdObj.tagId = tagId; createdObj.requiresUnlock = reqUnlock; }
+              createdKind = 'target';
+            } else if (knd === 'civilian' && world.addEditorCivilian) {
+              createdObj = world.addEditorCivilian(box.cx, box.cy, {
+                subType: box.tpl.subType, name: box.tpl.name, npcId: tagId, tagId, requiresUnlock: reqUnlock
+              });
             } else if (knd === 'horse' && world.placeEditorHorse) {
-              world.placeEditorHorse(box.cx, box.cy, state);
-              placed = true;
+              createdObj = world.placeEditorHorse(box.cx, box.cy, state);
+              if (createdObj) { createdObj.tagId = tagId; createdObj.requiresUnlock = reqUnlock; }
             } else if (knd === 'sheep' && world.addEditorSheep) {
-              world.addEditorSheep(box.cx, box.cy);
-              placed = true;
+              createdObj = world.addEditorSheep(box.cx, box.cy);
+              if (createdObj) { createdObj.tagId = tagId; createdObj.requiresUnlock = reqUnlock; }
+            } else if (knd === 'oil_lamp' && world.addEditorOilLamp) {
+              createdObj = world.addEditorOilLamp(box.cx, box.cy);
+              if (createdObj) { createdObj.tagId = tagId; createdObj.requiresUnlock = reqUnlock; }
+            } else if (knd === 'crow' && world.addEditorCrow) {
+              createdObj = world.addEditorCrow(box.cx, box.cy);
+              if (createdObj) { createdObj.tagId = tagId; createdObj.requiresUnlock = reqUnlock; }
+            } else if (knd === 'snake' && world.addEditorSnake) {
+              createdObj = world.addEditorSnake(box.cx, box.cy);
+              if (createdObj) { createdObj.tagId = tagId; createdObj.requiresUnlock = reqUnlock; }
+            } else if (knd === 'spawn' && world.setEditorPlayerSpawn) {
+              createdObj = world.setEditorPlayerSpawn(box.cx, box.cy);
+            } else if (knd === 'zone' && world.addEditorZone) {
+              createdObj = world.addEditorZone(box.tpl.zoneKind || 'event', box.x, box.y, box.w, box.h, {
+                zoneId: tagId || (box.tpl.zoneKind === 'exit' ? 'exit_1' : 'event_1'),
+                tagId: tagId || (box.tpl.zoneKind === 'exit' ? 'exit_1' : 'event_1'),
+                requiresUnlock: reqUnlock
+              });
             }
-            if (placed) {
+            if (createdObj) {
+              ed.selectedEntity = {
+                kind: createdKind,
+                obj: createdObj,
+                x: box.x,
+                y: box.y,
+                w: box.w,
+                h: box.h,
+                label: box.tpl.label
+              };
+              syncEditorInspectorDOM();
               if (G.NET && G.NET.broadcastMapSync) G.NET.broadcastMapSync(state, world);
               G.SIM.showToast(state, `ДОБАВЛЕНО: ${box.tpl.label.toUpperCase()}`, 0.8);
             }
@@ -1467,6 +2003,20 @@
     window.addEventListener('mouseup', (e) => {
       if (e.button === 0) state.input.lmb = false;
       if (e.button === 2) state.input.rmb = false;
+      const ed = state && state.editor;
+      if (ed && ed.active) {
+        if (ed._dragging) {
+          ed._dragging = false;
+          if (ed.selectedEntity && ed.selectedEntity.kind === 'solid' && world && world.rebuildGeometry) {
+            world.rebuildGeometry();
+          }
+          if (G.NET && G.NET.broadcastMapSync) G.NET.broadcastMapSync(state, world);
+        }
+        if (ed._terrainDirty) {
+          ed._terrainDirty = false;
+          if (G.NET && G.NET.broadcastMapSync) G.NET.broadcastMapSync(state, world);
+        }
+      }
     });
 
     window.addEventListener('blur', () => {
@@ -1477,6 +2027,7 @@
 
     window.addEventListener('wheel', (e) => {
       if (isPointerOverUI(e.target)) return;
+      if (state.screen !== 'playing') return;
       const dir = e.deltaY > 0 ? 1 : -1;
       const next = (state.player.weaponIdx + dir + G.WEAPONS.length) % G.WEAPONS.length;
       if (isClientNet()) {
@@ -1507,22 +2058,86 @@
         return;
       }
 
+      if (e.code === 'Escape') {
+        e.preventDefault();
+        // Приоритет 1: закрытие открытых модальных окон/настроек/перезарядки/гардероба
+        if (ui.settingsPanel && !ui.settingsPanel.classList.contains('hidden')) {
+          ui.settingsPanel.classList.add('hidden');
+          return;
+        }
+        if (ui.networkPanel && !ui.networkPanel.classList.contains('hidden')) {
+          ui.networkPanel.classList.add('hidden');
+          return;
+        }
+        if (ui.editorExitModal && !ui.editorExitModal.classList.contains('hidden')) {
+          ui.editorExitModal.classList.add('hidden');
+          return;
+        }
+        if (state.hatMenuOpen) {
+          state.hatMenuOpen = false;
+          return;
+        }
+        const curWs = G.SIM && G.SIM.getWState ? G.SIM.getWState(state) : null;
+        if (curWs && curWs.reloading) {
+          if (isClientNet()) G.NET.sendClientCommand('close_reload');
+          else G.SIM.closeReload(state);
+          return;
+        }
+        // Приоритет 2: переключение экранов
+        if (state.screen === 'menu') {
+          showMenuSubscreen('home');
+          return;
+        }
+        if (state.screen === 'editor') {
+          if (ui.editorExitModal) ui.editorExitModal.classList.remove('hidden');
+          else setScreen('playing');
+          return;
+        }
+        if (state.screen === 'playing') {
+          setScreen('paused');
+          return;
+        }
+        if (state.screen === 'paused') {
+          setScreen('playing');
+          return;
+        }
+        return;
+      }
+
       if (e.code === 'Space' || e.code.startsWith('Arrow')) {
         e.preventDefault();
       }
 
-      if (!state.input.keys[e.code]) {
+      if (state.screen === 'menu' || state.screen === 'paused') {
+        if (e.code === 'KeyV') {
+          G.CFG.debugRays = !G.CFG.debugRays;
+          G.SIM.showToast(state, G.CFG.debugRays ? 'ЛУЧИ ЭХА: ВКЛ' : 'ЛУЧИ ЭХА: ВЫКЛ', 0.9);
+        }
+        return;
+      }
+
+      const isEdMoveArrow = !!(state.editor && state.editor.active && state.editor.tool === 'move' && state.editor.selectedEntity && e.code.startsWith('Arrow'));
+      if (!state.input.keys[e.code] || isEdMoveArrow) {
         state.input.keys[e.code] = true;
+        if (e.altKey) state.input.keys.AltLeft = true;
         if (isClientNet()) {
           dispatchClientKeyAction(e.code);
         } else {
           G.SIM.handleKeyDown(state, world, e.code);
+          if (state.editor && state.editor.active && (e.code === 'KeyX' || e.code === 'Delete' || e.code === 'Backspace' || e.code === 'KeyM')) {
+            syncEditorInspectorDOM();
+          }
+          lastEditorKey = '';
         }
       }
     });
 
     window.addEventListener('keyup', (e) => {
       state.input.keys[e.code] = false;
+      if (!e.altKey) {
+        state.input.keys.AltLeft = false;
+        state.input.keys.AltRight = false;
+      }
     });
 
     if (ui.reloadCanvas) {
@@ -1758,6 +2373,159 @@
     }
 
     buildEditorPaletteDOM();
+    if (ui.btnCloseSettings) {
+      ui.btnCloseSettings.addEventListener('click', () => {
+        if (ui.settingsPanel) ui.settingsPanel.classList.add('hidden');
+      });
+    }
+    if (ui.btnCloseNetwork) {
+      ui.btnCloseNetwork.addEventListener('click', () => {
+        if (ui.networkPanel) ui.networkPanel.classList.add('hidden');
+      });
+    }
+
+    // ==================== ГЛАВНОЕ МЕНЮ, ПАУЗА И БИБЛИОТЕКА КАРТ ====================
+    if (ui.btnMenuStory) {
+      ui.btnMenuStory.addEventListener('click', () => showMenuSubscreen('story'));
+    }
+    if (ui.btnMenuFreeplay) {
+      ui.btnMenuFreeplay.addEventListener('click', () => showMenuSubscreen('play'));
+    }
+    if (ui.btnMenuEditor) {
+      ui.btnMenuEditor.addEventListener('click', () => showMenuSubscreen('editor'));
+    }
+    if (ui.btnMenuSettings) {
+      ui.btnMenuSettings.addEventListener('click', () => {
+        if (!ui.settingsPanel) return;
+        ui.settingsPanel.classList.toggle('hidden');
+        if (!ui.settingsPanel.classList.contains('hidden') && ui.networkPanel) {
+          ui.networkPanel.classList.add('hidden');
+        }
+        state.input.rebindingAction = null;
+        refreshKeybindLabels();
+      });
+    }
+    if (ui.btnMenuMultiplayer) {
+      ui.btnMenuMultiplayer.addEventListener('click', () => {
+        if (!ui.networkPanel) return;
+        ui.networkPanel.classList.toggle('hidden');
+        if (!ui.networkPanel.classList.contains('hidden')) {
+          if (ui.settingsPanel) ui.settingsPanel.classList.add('hidden');
+          lastNetKey = '';
+          updateNetUI();
+        }
+      });
+    }
+    if (ui.btnStoryBack) {
+      ui.btnStoryBack.addEventListener('click', () => showMenuSubscreen('home'));
+    }
+    if (ui.btnStoryCh1) {
+      ui.btnStoryCh1.addEventListener('click', () => {
+        loadMapIntoGame(null, 'playing', { storyMode: true });
+        G.SIM.showToast(state, 'ГЛАВА 1 (ПРЕВЬЮ-ХАБ): ХОЗЯИН САЛУНА', 2.0);
+      });
+    }
+    if (ui.btnPlayBack) {
+      ui.btnPlayBack.addEventListener('click', () => showMenuSubscreen('home'));
+    }
+    if (ui.btnPlayDefault) {
+      ui.btnPlayDefault.addEventListener('click', () => loadMapIntoGame(null, 'playing'));
+    }
+    if (ui.btnEditorListBack) {
+      ui.btnEditorListBack.addEventListener('click', () => showMenuSubscreen('home'));
+    }
+    if (ui.btnCreateBlankMap) {
+      ui.btnCreateBlankMap.addEventListener('click', () => {
+        if (!G.MAPS) return;
+        const sizeVal = ui.newMapSize ? ui.newMapSize.value : 'large';
+        const dims = sizeVal === 'small' ? { w: 1400, h: 840 } : (sizeVal === 'medium' ? { w: 2200, h: 900 } : { w: 3360, h: 960 });
+        const terrain = ui.newMapTerrain ? ui.newMapTerrain.value : 'dirt';
+        const nm = ui.newMapName && ui.newMapName.value ? ui.newMapName.value.trim() : 'Новая пустошь';
+        const blank = G.MAPS.createBlank({ name: nm || 'Новая пустошь', width: dims.w, height: dims.h, baseTerrain: terrain });
+        const saved = G.MAPS.save(blank);
+        loadMapIntoGame(saved || blank, 'editor');
+      });
+    }
+    if (ui.btnEditDefaultMap) {
+      ui.btnEditDefaultMap.addEventListener('click', () => {
+        loadMapIntoGame(null, 'editor');
+      });
+    }
+    if (ui.btnImportMapJson && ui.inputImportMap) {
+      ui.btnImportMapJson.addEventListener('click', () => {
+        ui.inputImportMap.value = '';
+        ui.inputImportMap.click();
+      });
+      ui.inputImportMap.addEventListener('change', (e) => {
+        const file = e.target && e.target.files && e.target.files[0];
+        if (!file || typeof FileReader === 'undefined') return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const imported = G.MAPS.importJson(String(reader.result || ''));
+            renderMapsLibraryUI();
+            G.SIM.showToast(state, `ИМПОРТ: ${imported.name.toUpperCase()}`, 1.5);
+          } catch (err) {
+            G.SIM.showToast(state, 'ОШИБКА ИМПОРТА JSON', 1.6);
+          }
+        };
+        reader.readAsText(file);
+      });
+    }
+
+    if (ui.btnPauseResume) {
+      ui.btnPauseResume.addEventListener('click', () => setScreen('playing'));
+    }
+    if (ui.btnPauseSettings) {
+      ui.btnPauseSettings.addEventListener('click', () => {
+        if (!ui.settingsPanel) return;
+        ui.settingsPanel.classList.toggle('hidden');
+        state.input.rebindingAction = null;
+        refreshKeybindLabels();
+      });
+    }
+    if (ui.btnPauseRestart) {
+      ui.btnPauseRestart.addEventListener('click', () => {
+        const curId = state.currentMapId || 'default';
+        const mapObj = (curId !== 'default' && G.MAPS) ? G.MAPS.get(curId) : null;
+        loadMapIntoGame(mapObj, 'playing');
+      });
+    }
+    if (ui.btnPauseEditor) {
+      ui.btnPauseEditor.addEventListener('click', () => {
+        if (isClientNet()) {
+          G.SIM.showToast(state, 'РЕДАКТОР ДОСТУПЕН ТОЛЬКО ХОСТУ', 1.3);
+          return;
+        }
+        setScreen('editor');
+      });
+    }
+    if (ui.btnPauseMainmenu) {
+      ui.btnPauseMainmenu.addEventListener('click', () => {
+        if (G.NET && G.NET.disconnect && state.netRole !== 'offline') {
+          G.NET.disconnect(state, world);
+        }
+        setScreen('menu');
+      });
+    }
+
+    if (ui.btnEdExitResume) {
+      ui.btnEdExitResume.addEventListener('click', () => {
+        if (ui.editorExitModal) ui.editorExitModal.classList.add('hidden');
+      });
+    }
+    if (ui.btnEdExitSaveMenu) {
+      ui.btnEdExitSaveMenu.addEventListener('click', () => {
+        saveCurrentEditorMap(false);
+        setScreen('menu');
+      });
+    }
+    if (ui.btnEdExitMenu) {
+      ui.btnEdExitMenu.addEventListener('click', () => {
+        setScreen('menu');
+      });
+    }
+
     if (ui.btnEditor) {
       ui.btnEditor.addEventListener('click', () => {
         if (isClientNet()) {
@@ -1766,6 +2534,7 @@
         }
         if (G.SIM.toggleEditorMode) {
           G.SIM.toggleEditorMode(state, world);
+          setScreen(state.editor && state.editor.active ? 'editor' : 'playing');
           if (state.editor && state.editor.active) {
             if (ui.settingsPanel) ui.settingsPanel.classList.add('hidden');
             if (ui.networkPanel) ui.networkPanel.classList.add('hidden');
@@ -1776,52 +2545,121 @@
     }
     if (ui.btnEditorPlace) {
       ui.btnEditorPlace.addEventListener('click', () => {
-        if (state && state.editor) state.editor.tool = 'place';
+        if (state && state.editor) {
+          state.editor.tool = 'place';
+          state.editor.selectedEntity = null;
+          state.editor._dragging = false;
+          syncEditorInspectorDOM();
+        }
         lastEditorKey = '';
+        updateEditorUI();
+      });
+    }
+    if (ui.btnEditorMove) {
+      ui.btnEditorMove.addEventListener('click', () => {
+        if (state && state.editor) {
+          state.editor.tool = 'move';
+          state.editor._dragging = false;
+        }
+        lastEditorKey = '';
+        updateEditorUI();
       });
     }
     if (ui.btnEditorRotate) {
       ui.btnEditorRotate.addEventListener('click', () => {
-        if (state && state.editor) state.editor.rotated = !state.editor.rotated;
+        const ed = state && state.editor;
+        if (!ed) return;
+        if (ed.tool === 'move' && ed.selectedEntity && world && world.rotateEditorEntity) {
+          if (world.rotateEditorEntity(ed.selectedEntity, state)) {
+            if (G.NET && G.NET.broadcastMapSync) G.NET.broadcastMapSync(state, world);
+            lastEditorKey = '';
+            updateEditorUI();
+            return;
+          }
+        }
+        ed.rotated = !ed.rotated;
         lastEditorKey = '';
+        updateEditorUI();
       });
     }
     if (ui.btnEditorErase) {
       ui.btnEditorErase.addEventListener('click', () => {
-        if (state && state.editor) state.editor.tool = 'erase';
+        if (state && state.editor) {
+          state.editor.tool = 'erase';
+          state.editor.selectedEntity = null;
+          state.editor._dragging = false;
+          syncEditorInspectorDOM();
+        }
         lastEditorKey = '';
+        updateEditorUI();
       });
     }
-    if (ui.btnEditorTabObjects) {
-      ui.btnEditorTabObjects.addEventListener('click', () => {
+    function switchEditorTab(tabName) {
+      if (!state || !state.editor) return;
+      state.editor.tab = tabName;
+      state.editor.tool = 'place';
+      state.editor.selectedEntity = null;
+      state.editor._dragging = false;
+      buildEditorPaletteDOM();
+      syncEditorInspectorDOM();
+      lastEditorKey = '';
+      updateEditorUI();
+    }
+    if (ui.btnEditorTabTerrain) ui.btnEditorTabTerrain.addEventListener('click', () => switchEditorTab('terrain'));
+    if (ui.btnEditorTabBuildings) ui.btnEditorTabBuildings.addEventListener('click', () => switchEditorTab('buildings'));
+    if (ui.btnEditorTabObjects) ui.btnEditorTabObjects.addEventListener('click', () => switchEditorTab('objects'));
+    if (ui.btnEditorTabNpc) ui.btnEditorTabNpc.addEventListener('click', () => switchEditorTab('npc'));
+    if (ui.btnEditorBrushSize) {
+      ui.btnEditorBrushSize.addEventListener('click', () => {
         if (!state || !state.editor) return;
-        state.editor.tab = 'objects';
-        state.editor.tool = 'place';
-        buildEditorPaletteDOM();
+        state.editor.brushSize = state.editor.brushSize === 2 ? 1 : 2;
         lastEditorKey = '';
+        updateEditorUI();
       });
     }
-    if (ui.btnEditorTabNpc) {
-      ui.btnEditorTabNpc.addEventListener('click', () => {
-        if (!state || !state.editor) return;
-        state.editor.tab = 'npc';
-        state.editor.tool = 'place';
-        buildEditorPaletteDOM();
-        lastEditorKey = '';
+    if (ui.editorPropTag) {
+      ui.editorPropTag.addEventListener('input', () => {
+        const ed = state && state.editor;
+        if (!ed) return;
+        if (ed.selectedEntity) {
+          setEntityTagValue(ed.selectedEntity, ui.editorPropTag.value);
+        } else {
+          ed.pendingTagId = ui.editorPropTag.value.trim();
+        }
+      });
+    }
+    if (ui.editorPropUnlock) {
+      ui.editorPropUnlock.addEventListener('input', () => {
+        const ed = state && state.editor;
+        if (!ed) return;
+        if (ed.selectedEntity) {
+          setEntityUnlockValue(ed.selectedEntity, ui.editorPropUnlock.value);
+          if (world && world.rebuildStoryVisibility) world.rebuildStoryVisibility(state);
+        } else {
+          ed.pendingRequiresUnlock = ui.editorPropUnlock.value.trim();
+        }
       });
     }
     if (ui.btnEditorSave) {
       ui.btnEditorSave.addEventListener('click', () => {
-        const ok = world && world.saveCustomMap ? world.saveCustomMap() : false;
-        G.SIM.showToast(state, ok ? 'КАРТА СОХРАНЕНА В LOCALSTORAGE' : 'ОШИБКА СОХРАНЕНИЯ', 1.4);
+        saveCurrentEditorMap(false);
+      });
+    }
+    if (ui.btnEditorSaveAs) {
+      ui.btnEditorSaveAs.addEventListener('click', () => {
+        saveCurrentEditorMap(true);
+      });
+    }
+    if (ui.btnEditorPlayTest) {
+      ui.btnEditorPlayTest.addEventListener('click', () => {
+        setScreen(state.screen === 'editor' ? 'playing' : 'editor');
+        G.SIM.showToast(state, state.screen === 'playing' ? 'ТЕСТ КАРТЫ' : 'ВОЗВРАТ В РЕДАКТОР', 1.1);
       });
     }
     if (ui.btnEditorCopy) {
       ui.btnEditorCopy.addEventListener('click', () => {
-        if (!world || !world.exportSolidsJSON) return;
-        const json = world.exportSolidsJSON();
-        G.lastExportedMapJson = json;
-        copyTextToClipboard(json, 'JSON КАРТЫ СКОПИРОВАН В БУФЕР', 'JSON ПОДГОТОВЛЕН (G.lastExportedMapJson)');
+        if (!world || !world.exportCustomMapData) return;
+        downloadMapJson(world.exportCustomMapData());
       });
     }
     if (ui.btnEditorReset) {
@@ -1890,6 +2728,7 @@
           mpMode: state.mpMode || 'coop',
           friendlyFire: !!state.friendlyFire
         }).then(() => {
+          if (state.screen === 'menu') setScreen('playing');
           lastNetKey = '';
           lastEditorKey = '';
           updateNetUI();
@@ -1913,6 +2752,7 @@
         if (!G.NET || !G.NET.joinRoom) return;
         const code = ui.netJoinCode ? ui.netJoinCode.value : '';
         G.NET.joinRoom(state, world, code).then(() => {
+          if (state.screen === 'menu') setScreen('playing');
           lastNetKey = '';
           lastEditorKey = '';
           updateNetUI();
@@ -2013,19 +2853,23 @@
   function getShadowLength(s) {
     if (s.type === 'cliff') return 18;
     if (s.type === 'building') return 15;
-    if (s.type === 'wall' || s.type === 'pillar') return 11;
+    if (s.type === 'wall' || s.type === 'window_wall' || s.type === 'pillar') return 11;
+    if (s.type === 'cactus') return 9;
     if (s.type === 'wagon') return 8;
     if (s.type === 'boulder') return 8;
+    if (s.type === 'bar_counter' || s.type === 'piano') return 7;
     if (s.type === 'water_barrel') return 6;
     if (s.type === 'hay') return 7;
     if (s.type === 'trough') return 5;
     if (s.type === 'fence') return 9;
     if (s.type === 'hitching_post' || s.isHitchingPost) return 5;
     if (s.type === 'low_wall') return 5;
+    if (s.type === 'chair') return 4;
     return 6;
   }
 
   function drawNoonShadow(g, s) {
+    if (s.walkThrough || s._storyHidden || s.type === 'skull' || s.type === 'campfire') return;
     const sal = (world && world.saloon) || { x: 24, y: 170, w: 440, h: 460 };
     const insideSaloon = s.x + s.w <= sal.x + sal.w + 2 && s.y >= sal.y && s.y + s.h <= sal.y + sal.h && s.type !== 'wall';
     const len = insideSaloon ? getShadowLength(s) * 0.45 : getShadowLength(s);
@@ -2545,7 +3389,35 @@
       sg.fillRect(rx, ry, 1, 1);
     }
 
-    barrelShellCaches[key] = { shell: shellCanvas, mask: maskCanvas, cx, cy, r, waterR, w, h };
+    // Статический слой полной воды, запекаемый 1 раз (идентичные 4 полосы P.water[3..0], тень, облака, маска)
+    const waterStaticCanvas = document.createElement('canvas');
+    waterStaticCanvas.width = w;
+    waterStaticCanvas.height = h;
+    const wsg = waterStaticCanvas.getContext('2d');
+    wsg.imageSmoothingEnabled = false;
+    wsg.fillStyle = P.water[3];
+    wsg.fillRect(cx - waterR, cy - waterR, waterR * 2, waterR * 2);
+    wsg.fillStyle = P.water[2];
+    wsg.fillRect(cx - waterR, cy - waterR, waterR * 2, Math.floor(waterR * 1.2));
+    wsg.fillStyle = P.water[1];
+    wsg.fillRect(cx - waterR, cy - waterR, waterR * 2, Math.floor(waterR * 0.6));
+    wsg.fillStyle = P.water[0];
+    wsg.fillRect(cx - waterR, cy - waterR, waterR * 2, Math.floor(waterR * 0.22));
+    wsg.fillStyle = P.cloud[0];
+    wsg.globalAlpha = 0.42;
+    wsg.fillRect(cx - 5, cy - 5, 9, 2);
+    wsg.fillRect(cx - 3, cy - 7, 5, 2);
+    wsg.fillStyle = P.cloud[1];
+    wsg.fillRect(cx - 10, cy + 2, 8, 2);
+    wsg.globalAlpha = 1;
+    wsg.fillStyle = 'rgba(20, 15, 12, 0.48)';
+    wsg.fillRect(cx - waterR, cy - waterR, waterR * 2, 2);
+    wsg.fillRect(cx - waterR, cy - waterR, 2, waterR * 2);
+    wsg.globalCompositeOperation = 'destination-in';
+    wsg.drawImage(maskCanvas, 0, 0);
+    wsg.globalCompositeOperation = 'source-over';
+
+    barrelShellCaches[key] = { shell: shellCanvas, mask: maskCanvas, waterStatic: waterStaticCanvas, cx, cy, r, waterR, w, h };
     return barrelShellCaches[key];
   }
 
@@ -2595,7 +3467,14 @@
     const hasFlash = !!(p && p.flashTimer > 0 && dist < 130 && wLvl > 0.05);
     const hasReflection = !!(p && !p.dead && dist < 62 && wLvl > 0.05);
 
-    // Единый рендер воды для всех видимых бочек (без расхождения между «быстрой» и «детальной» веткой)
+    // Быстрая ветка без waterScratchCanvas и destination-in для спокойной полной бочки
+    if (wLvl > 0.96 && !hasReflection && !hasRipple && !hasFlash) {
+      g.drawImage(cache.waterStatic, sx, sy);
+      g.drawImage(cache.shell, sx, sy);
+      return;
+    }
+
+    // Динамическая ветка: та же база waterStatic (при полной воде) + отражение/рябь/вспышка
     const wg = waterScratchCtx;
     const lx = cache.cx;
     const ly = cache.cy;
@@ -2610,6 +3489,8 @@
       for (let py = -waterR; py < waterR; py += 3) {
         wg.fillRect(lx - waterR, ly + py, waterR * 2, 2);
       }
+    } else if (wLvl > 0.96) {
+      wg.drawImage(cache.waterStatic, 0, 0);
     } else {
       wg.fillStyle = P.water[3];
       wg.fillRect(lx - waterR, ly - waterR, waterR * 2, waterR * 2);
@@ -2631,11 +3512,13 @@
       wg.globalAlpha = 1;
     }
 
-    // Внутренняя тень стенки над зеркалом воды (меняет глубину при падении waterLevel)
-    const rimShadowDepth = wLvl <= 0.05 ? 5 : Math.max(2, Math.round(2 + (1 - wLvl) * 6));
-    wg.fillStyle = 'rgba(20, 15, 12, 0.48)';
-    wg.fillRect(lx - waterR, ly - waterR, waterR * 2, rimShadowDepth);
-    wg.fillRect(lx - waterR, ly - waterR, Math.max(2, Math.round(rimShadowDepth * 0.75)), waterR * 2);
+    // Внутренняя тень стенки над зеркалом воды (если уровень воды снизился)
+    if (wLvl <= 0.96) {
+      const rimShadowDepth = wLvl <= 0.05 ? 5 : Math.max(2, Math.round(2 + (1 - wLvl) * 6));
+      wg.fillStyle = 'rgba(20, 15, 12, 0.48)';
+      wg.fillRect(lx - waterR, ly - waterR, waterR * 2, rimShadowDepth);
+      wg.fillRect(lx - waterR, ly - waterR, Math.max(2, Math.round(rimShadowDepth * 0.75)), waterR * 2);
+    }
 
     // Плавное появление отражения ближайшего живого игрока при приближении (dist < 62)
     if (hasReflection) {
@@ -2649,7 +3532,7 @@
       wg.translate(refX, refY);
       wg.rotate(p.aimAngle);
       wg.scale(1, -1);
-      wg.globalAlpha = prox * 0.72;
+      wg.globalAlpha = prox * 0.68;
 
       wg.fillStyle = colOut;
       wg.fillRect(-6, -9, 12, 18);
@@ -3170,6 +4053,7 @@
   }
 
   function drawSolid(g, s) {
+    if (s._storyHidden) return;
     if (s.type === 'water_barrel') {
       drawWaterBarrel(g, s);
       return;
@@ -3180,11 +4064,41 @@
     }
     if (s.baked && s.baked.canvas) {
       g.drawImage(s.baked.canvas, Math.round(s.x + s.baked.ox), Math.round(s.y + s.baked.oy));
+      if (s.type === 'campfire') {
+        const P = getPal();
+        const t = state ? state.time : 0;
+        const cx = Math.round(s.x + s.w * 0.5);
+        const cy = Math.round(s.y + s.h * 0.5);
+        const flicker = 0.82 + 0.18 * Math.sin(t * 16 + s.x);
+        const glow = getCachedPixelDisc(20, P.brass[0]);
+        g.globalAlpha = 0.16 * flicker;
+        g.drawImage(glow.canvas, cx - glow.half, cy - glow.half);
+        g.globalAlpha = 1;
+        const sw1 = Math.round(Math.sin(t * 15 + s.y) * 1.4);
+        const sw2 = Math.round(Math.cos(t * 19 + s.x) * 1.2);
+        // Пиксельные языки пламени (строго G.PAL, без arc)
+        g.fillStyle = P.barnRed[0];
+        g.fillRect(cx - 3 + sw1, cy - 4, 6, 6);
+        g.fillRect(cx - 2 - sw2, cy - 6, 4, 3);
+        g.fillStyle = P.brass[1];
+        g.fillRect(cx - 2 + sw2, cy - 4, 4, 5);
+        g.fillRect(cx - 1 + sw1, cy - 7, 2, 3);
+        g.fillStyle = P.brass[0];
+        g.fillRect(cx - 1, cy - 3, 2, 3);
+        if (Math.sin(t * 22 + s.x) > 0.1) {
+          g.fillStyle = '#ffffff';
+          g.fillRect(cx + sw2, cy - 5, 1, 2);
+        }
+      }
       drawCoverDamageOverlay(g, s);
       return;
     }
     drawSaloonInteriorSolid(g, s);
     drawCoverDamageOverlay(g, s);
+    if ((s.charred || 0) > 0.02) {
+      g.fillStyle = `rgba(20, 15, 12, ${Math.min(0.75, s.charred * 0.7).toFixed(2)})`;
+      g.fillRect(Math.round(s.x), Math.round(s.y), Math.round(s.w), Math.round(s.h));
+    }
   }
 
   function drawPolesAndWires(g, org) {
@@ -3249,6 +4163,7 @@
     if (!world.trees || !world.trees.length) return;
     for (let i = 0; i < world.trees.length; i++) {
       const tr = world.trees[i];
+      if (world.isEntityActive && !world.isEntityActive(tr, state)) continue;
       const rad = (tr.r || 18) * 1.4;
       if (org && !isInView(tr.x - rad, tr.y - rad, rad * 2 + 16, rad * 2 + 16, org, 32)) continue;
       g.fillStyle = 'rgba(20, 14, 10, 0.34)';
@@ -3273,6 +4188,7 @@
   function drawDoors(g) {
     const P = getPal();
     world.doors.forEach((d) => {
+      if (world.isEntityActive && !world.isEntityActive(d, state)) return;
       const a = d.baseAngle + d.angle;
       const ex = d.hingeX + Math.cos(a) * d.len;
       const ey = d.hingeY + Math.sin(a) * d.len;
@@ -3928,6 +4844,7 @@
     for (let i = 0; i < world.targets.length; i++) {
       const t = world.targets[i];
       if (!t.alive) continue;
+      if (world.isEntityActive && !world.isEntityActive(t, state)) continue;
       if (org && !isInView(t.x - 20, t.y - 20, 40, 40, org, 32)) continue;
 
       if (t.kind === 'bandit') {
@@ -4497,7 +5414,7 @@
     const hatBob = walking ? Math.abs(Math.sin(p.walkPhase || 0)) * 0.8 : 0;
 
     g.save();
-    g.translate(Math.round(pos.x), Math.round(pos.y - (p.mountedHorse ? 2 : 0)));
+    g.translate(Math.round(pos.x), Math.round(pos.y - (p.mountedHorse ? 3 : 0)));
 
     const rollProg = p.rolling ? G.MATH.clamp(1 - p.rollTimer / G.CFG.rollDur, 0, 1) : 0;
     const rollSquash = p.rolling ? Math.sin(rollProg * Math.PI) : 0;
@@ -4952,6 +5869,7 @@
   function drawHorse(g, org) {
     const h = world && world.horse;
     if (!h) return;
+    if (world.isEntityActive && !world.isEntityActive(h, state)) return;
     if (org && !isInView(h.x - 30, h.y - 30, 60, 60, org, 36)) return;
     const P = getPal();
     const colOut = P.outline || '#140f0c';
@@ -4984,28 +5902,28 @@
       g.translate(hx, hy);
       g.rotate(h.angle || 0);
       g.fillStyle = 'rgba(18, 12, 9, 0.35)';
-      g.fillRect(-14, -8, 28, 17);
+      g.fillRect(-16, -9, 32, 19);
       g.fillStyle = P.blood[2];
-      fillRoundPix(g, -10, -7, 16, 14);
+      fillRoundPix(g, -12, -8, 18, 16);
       g.fillStyle = colOut;
-      fillRoundPix(g, -13, -7, 26, 14);
+      fillRoundPix(g, -15, -8, 30, 16);
       g.fillStyle = P.leather[2];
-      fillRoundPix(g, -12, -6, 24, 12);
+      fillRoundPix(g, -14, -7, 28, 14);
       g.fillStyle = P.leather[4];
-      g.fillRect(-15, -3, 4, 6);
-      g.fillRect(10, -4, 7, 8);
+      g.fillRect(-18, -3, 5, 7);
+      g.fillRect(12, -4, 8, 9);
       g.restore();
       return;
     }
 
-    // Длинная полуденная тень лошади
+    // Длинная полуденная тень лошади (+20%)
     const shScale = isBucking ? 1.35 : 1.0;
     g.fillStyle = 'rgba(18, 12, 9, 0.38)';
     g.fillRect(
-      Math.round(hx + SUN.dx * 8 * shScale - 11),
-      Math.round(hy + SUN.dy * 8 * shScale - 6),
-      22,
-      12
+      Math.round(hx + SUN.dx * 9 * shScale - 13),
+      Math.round(hy + SUN.dy * 9 * shScale - 7),
+      26,
+      14
     );
 
     const flash = (h.hitFlash || 0) > 0;
@@ -5019,49 +5937,49 @@
 
     // Анимированные копыта на скачке / дыбах
     g.fillStyle = colOut;
-    g.fillRect(Math.round(5 + stride * 4), -8, 4, 2);
-    g.fillRect(Math.round(5 - stride * 4), 6, 4, 2);
-    g.fillRect(Math.round(-10 - stride * 3.5), -8, 4, 2);
-    g.fillRect(Math.round(-10 + stride * 3.5), 6, 4, 2);
+    g.fillRect(Math.round(6 + stride * 4.5), -10, 5, 3);
+    g.fillRect(Math.round(6 - stride * 4.5), 7, 5, 3);
+    g.fillRect(Math.round(-12 - stride * 4), -10, 5, 3);
+    g.fillRect(Math.round(-12 + stride * 4), 7, 5, 3);
 
     // Хвост (развевается на скорости)
-    const tailWag = Math.round(stride * 2);
+    const tailWag = Math.round(stride * 2.2);
     g.fillStyle = colOut;
-    fillRoundPix(g, -17, -2 + tailWag, 6, 4);
+    fillRoundPix(g, -20, -3 + tailWag, 7, 5);
     g.fillStyle = flash ? '#f2dfb8' : P.leather[4];
-    g.fillRect(-16, -1 + tailWag, 4, 2);
+    g.fillRect(-19, -2 + tailWag, 5, 3);
 
-    // Мощный корпус гнедого коня
+    // Мощный корпус гнедого коня (+20%)
     g.fillStyle = flash ? '#f2dfb8' : colOut;
-    fillRoundPix(g, -13, -7, 25, 14);
+    fillRoundPix(g, -15, -8, 29, 16);
     g.fillStyle = flash ? '#fff2d4' : P.leather[2];
-    fillRoundPix(g, -12, -6, 23, 12);
+    fillRoundPix(g, -14, -7, 27, 14);
     g.fillStyle = flash ? '#fff2d4' : P.leather[1];
-    fillRoundPix(g, -9, -5, 17, 10);
+    fillRoundPix(g, -11, -6, 20, 12);
     // Солнечный блик вдоль спины
     g.fillStyle = flash ? '#ffffff' : P.leather[0];
-    g.fillRect(-6, -3, 11, 4);
+    g.fillRect(-7, -4, 13, 5);
 
     // Грива вдоль шеи
     g.fillStyle = colOut;
-    g.fillRect(6, -3, 7, 6);
+    g.fillRect(7, -4, 8, 8);
     g.fillStyle = P.leather[4];
-    g.fillRect(7, -2, 5, 4);
+    g.fillRect(8, -3, 6, 6);
 
     // Шея и голова (вытягивается вниз при пощипывании травы, вздымается на дыбах)
-    const hBaseX = 11 + headExtend;
+    const hBaseX = 13 + headExtend;
     g.fillStyle = flash ? '#f2dfb8' : colOut;
-    fillRoundPix(g, hBaseX, -4, 9, 8);
+    fillRoundPix(g, hBaseX, -5, 11, 10);
     g.fillStyle = flash ? '#fff2d4' : P.leather[2];
-    fillRoundPix(g, hBaseX + 1, -3, 7, 6);
+    fillRoundPix(g, hBaseX + 1, -4, 9, 8);
     g.fillStyle = P.leather[0];
-    g.fillRect(hBaseX + 2, -2, 4, 3);
+    g.fillRect(hBaseX + 2, -3, 5, 4);
     // Ноздри и уши
     g.fillStyle = colOut;
-    g.fillRect(hBaseX + 1, -5, 2, 2);
-    g.fillRect(hBaseX + 1, 3, 2, 2);
+    g.fillRect(hBaseX + 1, -6, 2, 2);
+    g.fillRect(hBaseX + 1, 4, 2, 2);
     g.fillStyle = P.leather[4];
-    g.fillRect(hBaseX + 7, -2, 1, 4);
+    g.fillRect(hBaseX + 9, -2, 1, 4);
     // Уздечка и поводья
     g.fillStyle = P.brass[1];
     g.fillRect(hBaseX + 5, -3, 1, 6);
@@ -5110,6 +6028,7 @@
     for (let i = 0; i < list.length; i++) {
       const sh = list[i];
       if (!sh) continue;
+      if (world.isEntityActive && !world.isEntityActive(sh, state)) continue;
       if (org && !isInView(sh.x - 16, sh.y - 16, 32, 32, org, 24)) continue;
 
       const sx = Math.round(sh.x);
@@ -5120,80 +6039,78 @@
         g.translate(sx, sy);
         g.rotate(sh.angle || 0);
         g.fillStyle = 'rgba(18, 12, 9, 0.32)';
-        g.fillRect(-7, -5, 14, 10);
+        g.fillRect(-9, -7, 18, 13);
         g.fillStyle = P.blood[2];
-        fillRoundPix(g, -6, -5, 10, 9);
+        fillRoundPix(g, -8, -7, 13, 12);
         g.fillStyle = colOut;
-        fillRoundPix(g, -6, -4, 11, 8);
+        fillRoundPix(g, -8, -5, 14, 10);
         g.fillStyle = P.cloud[2];
-        fillRoundPix(g, -5, -3, 9, 6);
+        fillRoundPix(g, -7, -4, 12, 8);
         g.fillStyle = P.cloud[1];
-        g.fillRect(-4, -3, 6, 4);
+        g.fillRect(-5, -4, 8, 5);
         g.fillStyle = faceCol;
-        g.fillRect(4, -2, 3, 4);
+        g.fillRect(5, -3, 4, 5);
         g.restore();
         continue;
       }
 
-      // Короткая полуденная тень по вектору SUN (без arc())
+      // Короткая полуденная тень по вектору SUN (+30% модель)
       g.fillStyle = 'rgba(20, 14, 9, 0.34)';
-      g.fillRect(Math.round(sx + SUN.dx * 4 - 5), Math.round(sy + SUN.dy * 4 - 4), 10, 8);
+      g.fillRect(Math.round(sx + SUN.dx * 5 - 7), Math.round(sy + SUN.dy * 5 - 5), 14, 11);
 
       const flash = (sh.hitFlash || 0) > 0;
       const isWalking = sh.state === 'walk' || sh.state === 'flee';
-      const stride = isWalking ? Math.round(Math.sin(sh.walkPhase || 0) * 1.6) : 0;
-      const headDip = sh.state === 'graze' ? Math.round(Math.sin(sh.grazePhase || 0) * 1.1 + 1.5) : 0;
+      const stride = isWalking ? Math.round(Math.sin(sh.walkPhase || 0) * 2.0) : 0;
+      const headDip = sh.state === 'graze' ? Math.round(Math.sin(sh.grazePhase || 0) * 1.3 + 1.8) : 0;
 
       g.save();
       g.translate(sx, sy);
       g.rotate(sh.angle || 0);
 
-      // Короткие тёмные ножки
+      // Чёткие ножки
       g.fillStyle = colOut;
-      g.fillRect(-4 + stride, -5, 2, 2);
-      g.fillRect(2 - stride, -5, 2, 2);
-      g.fillRect(-4 - stride, 3, 2, 2);
-      g.fillRect(2 + stride, 3, 2, 2);
+      g.fillRect(-5 + stride, -7, 2, 3);
+      g.fillRect(3 - stride, -7, 2, 3);
+      g.fillRect(-5 - stride, 4, 2, 3);
+      g.fillRect(3 + stride, 4, 2, 3);
 
-      // Пушистая пиксельная шерсть (контур 1px + кучные кластеры в G.PAL.cloud)
+      // Объёмная пушистая шерсть +30% (контур 1px + кучные кластеры G.PAL.cloud[0..2])
       g.fillStyle = flash ? '#f2dfb8' : colOut;
-      fillRoundPix(g, -7, -5, 13, 10);
-      g.fillRect(-5, -6, 9, 12);
-      g.fillRect(-8, -3, 14, 6);
+      fillRoundPix(g, -9, -7, 17, 14);
+      g.fillRect(-7, -8, 12, 16);
+      g.fillRect(-10, -4, 18, 8);
 
       g.fillStyle = flash ? '#fff2d4' : P.cloud[2];
-      fillRoundPix(g, -6, -4, 11, 8);
-      g.fillRect(-4, -5, 7, 10);
+      fillRoundPix(g, -8, -6, 15, 12);
+      g.fillRect(-6, -7, 10, 14);
 
-      // Освещение шерсти по полуденному солнцу (верх-лево светлее)
+      // Освещение шерсти по полуденному солнцу
       g.fillStyle = flash ? '#ffffff' : P.cloud[1];
-      fillRoundPix(g, -6, -4, 9, 7);
+      fillRoundPix(g, -8, -6, 12, 9);
       g.fillStyle = flash ? '#ffffff' : P.cloud[0];
-      g.fillRect(-5, -4, 5, 4);
-      g.fillRect(-2, -5, 4, 3);
-      g.fillRect(1, -2, 2, 2);
+      g.fillRect(-6, -6, 6, 5);
+      g.fillRect(-2, -7, 5, 4);
+      g.fillRect(2, -3, 3, 3);
 
       // Хвостик
       g.fillStyle = colOut;
-      g.fillRect(-8, -1, 2, 2);
+      g.fillRect(-10, -2, 3, 3);
       g.fillStyle = P.cloud[1];
-      g.fillRect(-7, -1, 1, 2);
+      g.fillRect(-9, -1, 2, 2);
 
-      // Тёмная мордочка и ушки (наклоняется и тянется вперёд при щипании травы)
-      const hx = 4 + headDip;
+      // Чёткая тёмная мордочка и ушки
+      const hx = 5 + headDip;
       g.fillStyle = colOut;
-      g.fillRect(hx, -3, 5, 6);
+      g.fillRect(hx, -4, 6, 8);
       g.fillStyle = faceCol;
-      g.fillRect(hx + 1, -2, 3, 4);
-      // Ушки по бокам головы
+      g.fillRect(hx + 1, -3, 4, 6);
       g.fillStyle = colOut;
-      g.fillRect(hx, -4, 2, 2);
-      g.fillRect(hx, 2, 2, 2);
-      // Белый хохолок на лбу и крошечный блик морды
+      g.fillRect(hx, -5, 2, 2);
+      g.fillRect(hx, 3, 2, 2);
       g.fillStyle = P.cloud[0];
-      g.fillRect(hx, -1, 2, 2);
+      g.fillRect(hx, -2, 2, 3);
       g.fillStyle = P.woodPale[2];
-      g.fillRect(hx + 3, -1, 1, 2);
+      g.fillRect(hx + 4, -1, 1, 2);
 
       g.restore();
     }
@@ -5246,18 +6163,329 @@
     }
   }
 
+  function drawOilPuddles(g, org) {
+    const list = world && world.oilPuddles;
+    if (!list || !list.length) return;
+    const P = getPal();
+    const t = state ? state.time : 0;
+
+    for (let i = 0; i < list.length; i++) {
+      const pd = list[i];
+      if (!pd) continue;
+      const r = pd.r || 46;
+      if (org && !isInView(pd.x - r - 18, pd.y - r - 18, (r + 18) * 2, (r + 18) * 2, org, 24)) continue;
+
+      const px = Math.round(pd.x);
+      const py = Math.round(pd.y);
+      const fade = pd.alpha !== undefined ? G.MATH.clamp(pd.alpha, 0, 1) : 1.0;
+      if (fade <= 0.02) continue;
+
+      // Тёмное маслянистое пятно через getCachedPixelDisc
+      const baseCol = P.woodWarm ? P.woodWarm[4] : '#291c11';
+      const innerCol = P.cloth ? P.cloth[3] : '#2d3743';
+      const outerDisc = getCachedPixelDisc(r, baseCol);
+      const innerDisc = getCachedPixelDisc(Math.max(4, Math.round(r * 0.72)), innerCol);
+      g.globalAlpha = 0.86 * fade;
+      g.drawImage(outerDisc.canvas, px - outerDisc.half, py - outerDisc.half);
+      g.globalAlpha = 0.72 * fade;
+      g.drawImage(innerDisc.canvas, px - 2 - innerDisc.half, py - 1 - innerDisc.half);
+      // 1px переливчатые блики масла
+      g.globalAlpha = 0.75 * fade;
+      g.fillStyle = P.brass[2];
+      g.fillRect(px - Math.round(r * 0.38), py - Math.round(r * 0.22), 3, 1);
+      g.fillRect(px + Math.round(r * 0.18), py + Math.round(r * 0.25), 2, 1);
+      g.fillStyle = P.glass[2];
+      g.fillRect(px + Math.round(r * 0.24), py - Math.round(r * 0.28), 2, 1);
+      g.globalAlpha = 1;
+
+      if (pd.burning) {
+        // Фиксированный glowR (без прыгающего радиуса в кэше дисков!) — мерцает только globalAlpha
+        const glowR = Math.round(r * 1.25);
+        const glowDisc = getCachedPixelDisc(glowR, P.canyon[0]);
+        g.globalAlpha = (0.20 + 0.06 * Math.sin(t * 10 + i)) * fade;
+        g.drawImage(glowDisc.canvas, px - glowDisc.half, py - glowDisc.half);
+        g.globalAlpha = fade;
+
+        // Попиксельные языки пламени строго в пределах площади масла
+        const flames = 9;
+        for (let f = 0; f < flames; f++) {
+          const ang = (f / flames) * Math.PI * 2 + Math.sin(t * 3.1 + f * 1.7) * 0.3;
+          const distF = (f === 0) ? 0 : (r * (0.28 + ((f * 37) % 10) * 0.05));
+          const fx = Math.round(px + Math.cos(ang) * distF);
+          const fy = Math.round(py + Math.sin(ang) * distF);
+          const fh = Math.max(2, Math.round((4 + Math.abs(Math.sin(t * 12 + f * 2.3)) * 5) * fade));
+          g.fillStyle = P.barnRed[0];
+          g.fillRect(fx - 2, fy - fh + 2, 5, fh);
+          g.fillStyle = P.canyon[0];
+          g.fillRect(fx - 1, fy - fh + 1, 3, Math.max(2, fh - 1));
+          g.fillStyle = P.brass[0];
+          g.fillRect(fx - 1, fy - Math.max(2, Math.floor(fh * 0.55)), 2, Math.max(2, Math.floor(fh * 0.55)));
+          if ((f + Math.floor(t * 15)) % 2 === 0) {
+            g.fillStyle = '#ffffff';
+            g.fillRect(fx, fy - 2, 1, 2);
+          }
+        }
+        g.globalAlpha = 1;
+      }
+    }
+  }
+
+  function drawOilLamps(g, org) {
+    const list = world && world.oilLamps;
+    if (!list || !list.length) return;
+    const P = getPal();
+    const colOut = P.outline || '#140f0c';
+    const t = state ? state.time : 0;
+
+    for (let i = 0; i < list.length; i++) {
+      const lm = list[i];
+      if (!lm || !lm.alive) continue;
+      if (world.isEntityActive && !world.isEntityActive(lm, state)) continue;
+      if (org && !isInView(lm.x - 16, lm.y - 16, 32, 32, org, 24)) continue;
+
+      const lx = Math.round(lm.x);
+      const ly = Math.round(lm.y);
+      // Тёплая пиксельная подсветка вокруг лампы
+      const flicker = 0.85 + 0.15 * Math.sin(t * 13 + (lm.flickerSeed || i));
+      const glow = getCachedPixelDisc(16, P.brass[0]);
+      g.globalAlpha = 0.18 * flicker;
+      g.drawImage(glow.canvas, lx - glow.half, ly - glow.half);
+      g.globalAlpha = 1;
+
+      // Тень по SUN
+      g.fillStyle = 'rgba(20, 14, 9, 0.35)';
+      g.fillRect(Math.round(lx + SUN.dx * 3 - 3), Math.round(ly + SUN.dy * 3 - 2), 6, 5);
+
+      // Латунное основание + стеклянная колба + огонёк
+      g.fillStyle = colOut;
+      g.fillRect(lx - 4, ly - 4, 8, 8);
+      g.fillStyle = P.brass[2];
+      g.fillRect(lx - 3, ly - 3, 6, 6);
+      g.fillStyle = P.brass[1];
+      g.fillRect(lx - 2, ly - 2, 4, 4);
+      g.fillStyle = P.glass[1];
+      g.fillRect(lx - 2, ly - 3, 4, 3);
+      g.fillStyle = P.brass[0];
+      g.fillRect(lx - 1, ly - 2, 2, 2);
+      g.fillStyle = (Math.sin(t * 18 + i) > 0) ? '#ffffff' : P.brass[0];
+      g.fillRect(lx, ly - 2, 1, 1);
+    }
+  }
+
+  function drawCrows(g, org) {
+    const list = world && world.crows;
+    if (!list || !list.length) return;
+    const P = getPal();
+    const colOut = P.outline || '#140f0c';
+    const bodyCol = P.cloth ? P.cloth[4] : '#171d24';
+    const wingCol = P.steelDark ? P.steelDark[4] : '#262420';
+
+    for (let i = 0; i < list.length; i++) {
+      const cr = list[i];
+      if (!cr || cr.state === 'gone') continue;
+      if (world.isEntityActive && !world.isEntityActive(cr, state)) continue;
+      const drawY = cr.y - (cr.z || 0) * 0.45;
+      if (org && !isInView(cr.x - 14, drawY - 14, 28, 28, org, 32)) continue;
+
+      const cx = Math.round(cr.x);
+      const cy = Math.round(drawY);
+      const shOff = Math.round(2 + (cr.z || 0) * 0.35);
+      g.fillStyle = 'rgba(20, 14, 9, 0.32)';
+      g.fillRect(Math.round(cx + SUN.dx * shOff - 2), Math.round(cr.y + SUN.dy * shOff - 1), 5, 3);
+
+      g.save();
+      g.translate(cx, cy);
+      g.rotate(cr.angle || 0);
+      if (cr.state === 'flying' || cr.state === 'fly_to_corpse') {
+        const flap = Math.sin(cr.wingPhase || 0) > 0 ? 1 : -1;
+        g.fillStyle = colOut;
+        g.fillRect(-3, -2, 6, 4);
+        g.fillRect(-1, flap > 0 ? -6 : -4, 3, flap > 0 ? 12 : 8);
+        g.fillStyle = bodyCol;
+        g.fillRect(-2, -1, 4, 2);
+        g.fillStyle = wingCol;
+        g.fillRect(0, flap > 0 ? -5 : -3, 2, flap > 0 ? 10 : 6);
+        g.fillStyle = P.brass[2];
+        g.fillRect(3, -1, 2, 2);
+      } else {
+        g.fillStyle = colOut;
+        g.fillRect(-3, -3, 6, 6);
+        g.fillStyle = bodyCol;
+        g.fillRect(-2, -2, 4, 4);
+        g.fillStyle = wingCol;
+        g.fillRect(-2, -1, 3, 2);
+        g.fillStyle = P.brass[2];
+        g.fillRect(2, -1, 2, 2);
+      }
+      g.restore();
+    }
+  }
+
+  function drawLizards(g, org) {
+    const list = world && world.lizards;
+    if (!list || !list.length) return;
+    const P = getPal();
+    const colOut = P.outline || '#140f0c';
+
+    for (let i = 0; i < list.length; i++) {
+      const lz = list[i];
+      if (!lz) continue;
+      if (org && !isInView(lz.x - 16, lz.y - 16, 32, 32, org, 18)) continue;
+
+      const lx = Math.round(lz.x);
+      const ly = Math.round(lz.y);
+      const isGreen = lz.colIdx === 0;
+      const bodyDark = isGreen ? (P.foliage ? P.foliage[3] : '#323d1e') : (P.canyon ? P.canyon[2] : '#7d4a26');
+      const bodyMid = isGreen ? (P.foliage ? P.foliage[1] : '#5c6e3b') : (P.canyon ? P.canyon[1] : '#a46438');
+      const backCol = isGreen ? (P.foliage ? P.foliage[0] : '#798e4c') : (P.grass ? P.grass[0] : '#d4b464');
+      const ph = lz.tailPhase || 0;
+      const runLeg = (lz.state === 'flee' || lz.state === 'scurry') ? Math.round(Math.sin(ph)) : 0;
+      const w1 = Math.round(Math.sin(ph) * 1.2);
+      const w2 = Math.round(Math.sin(ph + 1.5) * 1.6);
+      const w3 = Math.round(Math.sin(ph + 3.0) * 1.9);
+
+      // Короткая контактная тень по SUN
+      g.fillStyle = 'rgba(20, 14, 9, 0.28)';
+      g.fillRect(Math.round(lx + SUN.dx * 2 - 4), Math.round(ly + SUN.dy * 2 - 2), 9, 4);
+
+      g.save();
+      g.translate(lx, ly);
+      g.rotate(lz.angle || 0);
+
+      // 4 растопыренные в стороны лапки (переставляются при беге)
+      g.fillStyle = colOut;
+      g.fillRect(1 + runLeg, -4, 2, 2);
+      g.fillRect(1 - runLeg, 2, 2, 2);
+      g.fillRect(-3 - runLeg, -4, 2, 2);
+      g.fillRect(-3 + runLeg, 2, 2, 2);
+      g.fillStyle = bodyDark;
+      g.fillRect(1 + runLeg, -3, 1, 1);
+      g.fillRect(1 - runLeg, 2, 1, 1);
+      g.fillRect(-3 - runLeg, -3, 1, 1);
+      g.fillRect(-3 + runLeg, 2, 1, 1);
+
+      // Длинный тонкий извивающийся хвост из 3 сегментов (7-8 px)
+      g.fillStyle = colOut;
+      g.fillRect(-6, w1 - 1, 3, 2);
+      g.fillRect(-9, w2 - 1, 3, 2);
+      g.fillRect(-11, w3, 2, 1);
+      g.fillStyle = bodyMid;
+      g.fillRect(-6, w1, 2, 1);
+      g.fillStyle = bodyDark;
+      g.fillRect(-9, w2, 2, 1);
+
+      // Гибкое узкое туловище (7x3 px с 1px окантовкой и контрастной спинкой)
+      g.fillStyle = colOut;
+      g.fillRect(-4, -2, 8, 4);
+      g.fillStyle = bodyMid;
+      g.fillRect(-3, -1, 7, 2);
+      g.fillStyle = backCol;
+      g.fillRect(-2, -1, 5, 1);
+
+      // Чёткая вытянутая клиновидная голова спереди (3x3 + пара тёмных глаз)
+      g.fillStyle = colOut;
+      g.fillRect(4, -2, 4, 4);
+      g.fillStyle = bodyMid;
+      g.fillRect(4, -1, 3, 2);
+      g.fillStyle = backCol;
+      g.fillRect(5, -1, 1, 2);
+      g.fillStyle = colOut;
+      g.fillRect(5, -2, 1, 1);
+      g.fillRect(5, 1, 1, 1);
+
+      g.restore();
+    }
+  }
+
+  function drawSnakes(g, org) {
+    const list = world && world.snakes;
+    if (!list || !list.length) return;
+    const P = getPal();
+    const colOut = P.outline || '#140f0c';
+    const bodyA = P.dirt ? P.dirt[3] : '#6b4c2d';
+    const bodyB = P.grass ? P.grass[2] : '#8a6f2e';
+    const rattleCol = P.canyon ? P.canyon[3] : '#593318';
+
+    for (let i = 0; i < list.length; i++) {
+      const sn = list[i];
+      if (!sn) continue;
+      if (world.isEntityActive && !world.isEntityActive(sn, state)) continue;
+      if (org && !isInView(sn.x - 14, sn.y - 14, 28, 28, org, 20)) continue;
+
+      const sx = Math.round(sn.x);
+      const sy = Math.round(sn.y);
+      if (!sn.alive) {
+        g.fillStyle = P.blood[2];
+        g.fillRect(sx - 4, sy - 3, 8, 6);
+        g.fillStyle = colOut;
+        g.fillRect(sx - 5, sy - 1, 10, 2);
+        return;
+      }
+
+      g.save();
+      g.translate(sx, sy);
+      g.rotate(sn.angle || 0);
+      if (sn.state === 'coil') {
+        const vib = Math.round(Math.sin(sn.phase || 0));
+        g.fillStyle = colOut;
+        g.fillRect(-5, -5, 10, 10);
+        g.fillStyle = bodyA;
+        g.fillRect(-4, -4, 8, 8);
+        g.fillStyle = bodyB;
+        g.fillRect(-3, -3, 6, 2);
+        g.fillRect(-3, 1, 6, 2);
+        g.fillStyle = rattleCol;
+        g.fillRect(-6, -2 + vib, 2, 3);
+        g.fillStyle = P.brass[0];
+        g.fillRect(4, -2, 3, 3);
+      } else {
+        const w1 = Math.round(Math.sin(sn.phase || 0) * 1.5);
+        const w2 = Math.round(Math.sin((sn.phase || 0) + 1.8) * 1.5);
+        // S-силуэт с 1px контуром
+        g.fillStyle = colOut;
+        g.fillRect(-7, w1 - 1, 5, 3);
+        g.fillRect(-3, w2 - 1, 5, 3);
+        g.fillRect(1, -1, 5, 3);
+        g.fillStyle = bodyA;
+        g.fillRect(-6, w1, 4, 2);
+        g.fillStyle = bodyB;
+        g.fillRect(-2, w2, 4, 2);
+        g.fillStyle = rattleCol;
+        g.fillRect(-7, w1, 2, 2);
+        g.fillStyle = bodyA;
+        g.fillRect(2, 0, 3, 2);
+      }
+      g.restore();
+    }
+  }
+
   function drawBullets(g) {
     for (let i = 0; i < state.bullets.length; i++) {
       const b = state.bullets[i];
-      g.strokeStyle = 'rgba(242, 212, 134, 0.85)';
-      g.lineWidth = 1;
-      g.beginPath();
-      g.moveTo(Math.round(b.px), Math.round(b.py));
-      g.lineTo(Math.round(b.x), Math.round(b.y));
-      g.stroke();
+      if (b.ricocheted) {
+        g.strokeStyle = 'rgba(255, 246, 178, 0.96)';
+        g.lineWidth = 2;
+        g.beginPath();
+        g.moveTo(Math.round(b.px), Math.round(b.py));
+        g.lineTo(Math.round(b.x), Math.round(b.y));
+        g.stroke();
 
-      g.fillStyle = '#fff9df';
-      g.fillRect(Math.round(b.x), Math.round(b.y), 2, 2);
+        g.fillStyle = '#ffffff';
+        g.fillRect(Math.round(b.x) - 1, Math.round(b.y) - 1, 3, 3);
+        g.fillStyle = '#f2d486';
+        g.fillRect(Math.round((b.x + b.px) * 0.5) - 1, Math.round((b.y + b.py) * 0.5) + 1, 2, 2);
+        g.fillRect(Math.round(b.px), Math.round(b.py) - 1, 1, 1);
+      } else {
+        g.strokeStyle = 'rgba(242, 212, 134, 0.85)';
+        g.lineWidth = 1;
+        g.beginPath();
+        g.moveTo(Math.round(b.px), Math.round(b.py));
+        g.lineTo(Math.round(b.x), Math.round(b.y));
+        g.stroke();
+
+        g.fillStyle = '#fff9df';
+        g.fillRect(Math.round(b.x), Math.round(b.y), 2, 2);
+      }
     }
   }
 
@@ -5584,15 +6812,44 @@
     return c;
   }
 
-  function drawSaloonInteractables(g) {
+  let dartboardCanvas = null;
+  function getDartboardCanvas(P) {
+    if (dartboardCanvas) return dartboardCanvas;
+    const c = document.createElement('canvas');
+    c.width = 16; c.height = 16;
+    const g = c.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    const colOut = P.outline || '#140f0c';
+    pxDisc(g, 8, 8, 7, colOut);
+    pxDisc(g, 8, 8, 6, P.barnRed[0]);
+    pxDisc(g, 8, 8, 5, P.woodPale[0]);
+    pxDisc(g, 8, 8, 4, P.foliage[1]);
+    pxDisc(g, 8, 8, 2, P.barnRed[0]);
+    g.fillStyle = P.brass[0];
+    g.fillRect(7, 7, 2, 2);
+    // Два воткнутых дротика
+    g.fillStyle = colOut;
+    g.fillRect(4, 4, 2, 2);
+    g.fillRect(10, 9, 2, 2);
+    g.fillStyle = P.brass[0];
+    g.fillRect(3, 3, 2, 2);
+    g.fillStyle = P.cloud[0];
+    g.fillRect(11, 10, 2, 2);
+    dartboardCanvas = c;
+    return c;
+  }
+
+  function drawSaloonInteractables(g, org) {
     if (!world || !world.interactables) return;
     const P = getPal();
     const colOut = P.outline || '#140f0c';
 
     for (let i = 0; i < world.interactables.length; i++) {
       const it = world.interactables[i];
+      if (world.isEntityActive && !world.isEntityActive(it, state)) continue;
       const ix = Math.round(it.x);
       const iy = Math.round(it.y);
+      if (org && !isInView(ix - 20, iy - 20, 40, 40, org, 24)) continue;
 
       if (it.kind === 'bourbon') {
         if (!state.saloonProps || !state.saloonProps.bourbonAvailable) continue;
@@ -5644,6 +6901,129 @@
         g.fillRect(ix - 2, iy - 1, 4, 2);
         g.fillStyle = P.brass[0];
         g.fillRect(ix - 2, iy + 3, 4, 1);
+      } else if (it.kind === 'dartboard') {
+        g.fillStyle = 'rgba(20, 14, 10, 0.36)';
+        g.fillRect(ix - 5, iy + 2, 12, 7);
+        g.drawImage(getDartboardCanvas(P), ix - 8, iy - 8);
+      } else if (it.kind === 'notice_board') {
+        g.fillStyle = 'rgba(20, 14, 10, 0.38)';
+        g.fillRect(ix - 12, iy + 4, 26, 5);
+        g.fillStyle = colOut;
+        g.fillRect(ix - 14, iy - 8, 28, 16);
+        g.fillStyle = P.woodWarm[2];
+        g.fillRect(ix - 13, iy - 7, 26, 14);
+        g.fillStyle = P.woodWarm[0];
+        g.fillRect(ix - 13, iy - 7, 26, 2);
+        // Листки WANTED и кнопки
+        g.fillStyle = P.cloud[0];
+        g.fillRect(ix - 10, iy - 4, 6, 8);
+        g.fillRect(ix - 2, iy - 5, 7, 9);
+        g.fillRect(ix + 7, iy - 4, 5, 7);
+        g.fillStyle = P.barnRed[0];
+        g.fillRect(ix - 8, iy - 5, 2, 2);
+        g.fillRect(ix + 1, iy - 6, 2, 2);
+        g.fillRect(ix + 9, iy - 5, 2, 2);
+        g.fillStyle = P.woodWarm[4];
+        g.fillRect(ix - 9, iy - 1, 4, 3);
+        g.fillRect(ix, iy - 2, 4, 3);
+      }
+    }
+  }
+
+  function drawCivilians(g, org) {
+    const list = world && world.civilians;
+    if (!list || !list.length) return;
+    const P = getPal();
+    const colOut = P.outline || '#140f0c';
+    const skinCol = (P.skin && P.skin[1]) || '#c49876';
+    const isEd = !!(state && state.editor && state.editor.active);
+    const t = state ? state.time : 0;
+
+    for (let i = 0; i < list.length; i++) {
+      const cv = list[i];
+      if (!cv) continue;
+      if (world.isEntityActive && !world.isEntityActive(cv, state)) continue;
+      if (org && !isInView(cv.x - 18, cv.y - 18, 36, 36, org, 24)) continue;
+
+      const cx = Math.round(cv.x);
+      const cy = Math.round(cv.y);
+      const lookYaw = (cv.angle || Math.PI * 0.5) + Math.sin(t * 0.9 + (cv.lookPhase || i)) * 0.24;
+
+      // Полуденная контактная тень по SUN
+      g.fillStyle = 'rgba(20, 14, 10, 0.36)';
+      fillRoundPix(g, Math.round(cx + SUN.dx * 3.2 - 6), Math.round(cy + SUN.dy * 3.2 - 5), 13, 11);
+
+      g.save();
+      g.translate(cx, cy);
+      g.rotate(lookYaw);
+
+      const sub = cv.subType || 'cowboy';
+      if (sub === 'lady') {
+        const dress = cv.dressTone === 'slateTeal' ? P.slateTeal : P.barnRed;
+        g.fillStyle = colOut;
+        fillRoundPix(g, -6, -8, 12, 16);
+        g.fillStyle = dress[2];
+        fillRoundPix(g, -5, -7, 10, 14);
+        g.fillStyle = dress[0];
+        g.fillRect(-4, -5, 4, 10);
+        g.fillStyle = P.cloud[0];
+        g.fillRect(1, -4, 3, 8);
+        // Причёска и плечи
+        g.fillStyle = colOut;
+        pxDisc(g, 0, 0, 5, colOut);
+        pxDisc(g, 0, 0, 4, skinCol);
+        pxDisc(g, -1, 0, 4, P.leather[3]);
+        g.fillStyle = P.leather[2];
+        g.fillRect(-3, -2, 3, 4);
+      } else {
+        const bodyPal = sub === 'hunter'
+          ? P.woodPale
+          : (sub === 'quest' ? P.cloth : P.woodWarm);
+        // Для охотника — винтовка за спиной по диагонали
+        if (sub === 'hunter') {
+          g.fillStyle = colOut;
+          g.fillRect(-7, -7, 4, 14);
+          g.fillStyle = P.woodWarm[2];
+          g.fillRect(-6, -6, 2, 8);
+          g.fillStyle = P.steelDark[1];
+          g.fillRect(-6, 2, 2, 5);
+        }
+        g.fillStyle = colOut;
+        fillRoundPix(g, -6, -8, 12, 16);
+        g.fillStyle = bodyPal[2];
+        fillRoundPix(g, -5, -7, 10, 14);
+        g.fillStyle = bodyPal[0];
+        g.fillRect(-4, -6, 4, 12);
+        if (sub === 'quest') {
+          g.fillStyle = P.brass[0];
+          g.fillRect(1, -3, 2, 6);
+        } else if (sub === 'cowboy') {
+          g.fillStyle = P.slateTeal[1];
+          g.fillRect(2, -3, 2, 6);
+        }
+        // Голова и шляпа
+        pxDisc(g, 0, 0, 5, colOut);
+        pxDisc(g, 0, 0, 4, skinCol);
+        const brimCol = sub === 'quest' ? P.woodPale[1] : (sub === 'hunter' ? P.leather[2] : P.leather[3]);
+        const crownCol = sub === 'quest' ? P.woodPale[0] : (sub === 'hunter' ? P.leather[1] : P.leather[2]);
+        pxDisc(g, -1, 0, 5, colOut);
+        pxDisc(g, -1, 0, 4, brimCol);
+        pxDisc(g, -1, 0, 2, crownCol);
+        if (sub === 'hunter') {
+          g.fillStyle = P.grass[0];
+          g.fillRect(-3, -3, 3, 1);
+        }
+      }
+
+      g.restore();
+
+      // Квестовый знак «!» в редакторе
+      if (isEd && sub === 'quest') {
+        g.fillStyle = colOut;
+        g.fillRect(cx - 2, cy - 16, 4, 8);
+        g.fillStyle = P.brass[0];
+        g.fillRect(cx - 1, cy - 15, 2, 4);
+        g.fillRect(cx - 1, cy - 10, 2, 1);
       }
     }
   }
@@ -5898,8 +7278,8 @@
   }
 
   const editorGhostCache = {};
-  function getEditorGhostStub(tpl, w, h) {
-    const key = `${tpl.type}|${w}x${h}`;
+  function getEditorGhostStub(tpl, w, h, rot) {
+    const key = `${tpl.type}|${w}x${h}|${rot ? 1 : 0}`;
     if (!editorGhostCache[key]) {
       const knd = tpl.kind || 'solid';
       if (knd === 'tree') {
@@ -5907,6 +7287,7 @@
         if (world && world.bakeSolidSprites) world.bakeSolidSprites([], [tr]);
         editorGhostCache[key] = { kind: 'tree', baked: tr.baked };
       } else {
+        const sType = tpl.solidType || tpl.type;
         const stub = {
           id: 'ghost_' + key,
           x: 0,
@@ -5914,13 +7295,21 @@
           w: w,
           h: h,
           mat: tpl.mat,
-          type: tpl.type,
+          type: sType,
           high: tpl.high,
+          rotated: !!rot,
           isCover: true,
           isHitchingPost: !!tpl.isHitchingPost,
-          interior: !!tpl.interior
+          interior: !!tpl.interior,
+          showFacade: sType === 'building' ? true : undefined,
+          wallPalKey: tpl.wallPalKey,
+          roofPalKey: tpl.roofPalKey,
+          roofStyle: tpl.roofStyle,
+          signText: tpl.signText,
+          buildingType: tpl.buildingType,
+          chimney: !!tpl.chimney
         };
-        if (tpl.type !== 'water_barrel' && world && world.bakeSolidSprites) {
+        if (sType !== 'water_barrel' && world && world.bakeSolidSprites) {
           world.bakeSolidSprites([stub], []);
         }
         editorGhostCache[key] = stub;
@@ -5929,35 +7318,150 @@
     return editorGhostCache[key];
   }
 
+  function drawPixelPadlock(g, x, y, P) {
+    const colOut = P.outline || '#140f0c';
+    const colGold = (P.brass && P.brass[0]) || '#f2da91';
+    const px = Math.round(x);
+    const py = Math.round(y);
+    g.fillStyle = colOut;
+    g.fillRect(px, py + 2, 7, 5);
+    g.fillRect(px + 1, py, 5, 3);
+    g.fillStyle = colGold;
+    g.fillRect(px + 2, py + 1, 1, 2);
+    g.fillRect(px + 4, py + 1, 1, 2);
+    g.fillRect(px + 2, py, 3, 1);
+    g.fillRect(px + 1, py + 3, 5, 3);
+    g.fillStyle = colOut;
+    g.fillRect(px + 3, py + 4, 1, 2);
+  }
+
   function drawEditorOverlay(g, org) {
     const ed = state && state.editor;
     if (!ed || !ed.active) return;
     const P = getPal();
 
-    // Пиксельная сетка 8x8 в зоне видимости
-    const step = ed.gridStep || 8;
-    const startX = Math.floor(org.x / step) * step;
-    const startY = Math.floor(org.y / step) * step;
+    // Визуальные точки сетки рисуем с шагом 8 px (чтобы при шаге привязки 4 px экран не рябил)
+    const visStep = Math.max(8, (ed.gridStep || 4) * 2);
+    const startX = Math.floor(org.x / visStep) * visStep;
+    const startY = Math.floor(org.y / visStep) * visStep;
     g.save();
     g.fillStyle = 'rgba(242, 218, 145, 0.14)';
-    for (let gy = startY; gy < org.y + pixH + step; gy += step * 2) {
-      for (let gx = startX; gx < org.x + pixW + step; gx += step * 2) {
+    for (let gy = startY; gy < org.y + pixH + visStep; gy += visStep) {
+      for (let gx = startX; gx < org.x + pixW + visStep; gx += visStep) {
         g.fillRect(gx, gy, 1, 1);
       }
     }
 
+    // Маркер старта игрока (зелёный пиксельный крест + СТАРТ)
+    if (world && world.playerSpawn) {
+      const spx = Math.round(world.playerSpawn.x);
+      const spy = Math.round(world.playerSpawn.y);
+      if (!org || isInView(spx - 24, spy - 24, 48, 48, org, 24)) {
+        g.fillStyle = P.outline;
+        g.fillRect(spx - 9, spy - 2, 18, 4);
+        g.fillRect(spx - 2, spy - 9, 4, 18);
+        g.fillStyle = P.foliage[0];
+        g.fillRect(spx - 8, spy - 1, 16, 2);
+        g.fillRect(spx - 1, spy - 8, 2, 16);
+        g.font = 'bold 8px "Courier New", monospace';
+        g.textAlign = 'center';
+        g.fillStyle = P.outline;
+        g.fillText('СТАРТ', spx + 1, spy - 11);
+        g.fillStyle = P.foliage[0];
+        g.fillText('СТАРТ', spx, spy - 12);
+      }
+    }
+
+    // Триггер-зоны (выезд / событие)
+    if (world && world.zones && world.zones.length) {
+      g.font = 'bold 8px "Courier New", monospace';
+      g.textAlign = 'left';
+      for (let i = 0; i < world.zones.length; i++) {
+        const zn = world.zones[i];
+        if (org && !isInView(zn.x - 8, zn.y - 8, zn.w + 16, zn.h + 16, org, 24)) continue;
+        const isExit = zn.zoneKind === 'exit';
+        const borderCol = isExit ? P.brass[0] : P.glass[0];
+        g.fillStyle = isExit ? 'rgba(214, 174, 82, 0.14)' : 'rgba(123, 164, 173, 0.14)';
+        g.fillRect(zn.x, zn.y, zn.w, zn.h);
+        g.fillStyle = borderCol;
+        for (let x = zn.x; x < zn.x + zn.w; x += 6) {
+          const seg = Math.min(3, zn.x + zn.w - x);
+          g.fillRect(x, zn.y, seg, 1);
+          g.fillRect(x, zn.y + zn.h - 1, seg, 1);
+        }
+        for (let y = zn.y; y < zn.y + zn.h; y += 6) {
+          const seg = Math.min(3, zn.y + zn.h - y);
+          g.fillRect(zn.x, y, 1, seg);
+          g.fillRect(zn.x + zn.w - 1, y, 1, seg);
+        }
+        const zLbl = (isExit ? 'ВЫЕЗД: ' : 'ЗОНА: ') + (zn.zoneId || zn.tagId || zn.id);
+        g.fillStyle = P.outline;
+        g.fillText(zLbl, zn.x + 4, zn.y + 10);
+        g.fillStyle = borderCol;
+        g.fillText(zLbl, zn.x + 3, zn.y + 9);
+        if (zn.requiresUnlock) drawPixelPadlock(g, zn.x + zn.w - 10, zn.y + 3, P);
+      }
+    }
+
+    // Пиксельные замки requiresUnlock на всех объектах с наградой
+    if (world) {
+      if (world.solids) {
+        for (let i = 0; i < world.solids.length; i++) {
+          const s = world.solids[i];
+          if (s.requiresUnlock && (!org || isInView(s.x, s.y, s.w, s.h, org, 16))) {
+            drawPixelPadlock(g, s.x + s.w - 8, s.y + 2, P);
+          }
+        }
+      }
+      if (world.interactables) {
+        for (let i = 0; i < world.interactables.length; i++) {
+          const it = world.interactables[i];
+          if (it.requiresUnlock && (!org || isInView(it.x - 16, it.y - 16, 32, 32, org, 16))) {
+            drawPixelPadlock(g, it.x + 4, it.y - 12, P);
+          }
+        }
+      }
+      if (world.civilians) {
+        for (let i = 0; i < world.civilians.length; i++) {
+          const cv = world.civilians[i];
+          if (cv.requiresUnlock && (!org || isInView(cv.x - 16, cv.y - 16, 32, 32, org, 16))) {
+            drawPixelPadlock(g, cv.x + 5, cv.y - 13, P);
+          }
+        }
+      }
+      if (world.targets) {
+        for (let i = 0; i < world.targets.length; i++) {
+          const tr = world.targets[i];
+          if (tr.requiresUnlock && (!org || isInView(tr.x - 16, tr.y - 16, 32, 32, org, 16))) {
+            drawPixelPadlock(g, tr.x + 5, tr.y - 13, P);
+          }
+        }
+      }
+      if (world.oilLamps) {
+        for (let i = 0; i < world.oilLamps.length; i++) {
+          const lm = world.oilLamps[i];
+          if (lm.requiresUnlock && (!org || isInView(lm.x - 12, lm.y - 12, 24, 24, org, 16))) {
+            drawPixelPadlock(g, lm.x + 3, lm.y - 9, P);
+          }
+        }
+      }
+    }
+
     const wm = screenToWorld(state.input.mouseX, state.input.mouseY);
-    const hoverHit = world.findEditorEntityAt ? world.findEditorEntityAt(wm.x, wm.y) : null;
+    const hoverHit = (!ed._dragging && world.findEditorEntityAt) ? world.findEditorEntityAt(wm.x, wm.y) : null;
     ed.hoverEntity = hoverHit;
     ed.hoverSolidId = (hoverHit && hoverHit.kind === 'solid' && hoverHit.obj) ? hoverHit.obj.id : null;
 
     if (ed.tool === 'place') {
-      const box = getEditorPlaceBox();
+      const box = getEditorPlaceBox(!!(state.input.keys.AltLeft || state.input.keys.AltRight));
       if (box) {
         const knd = box.tpl.kind || 'solid';
         g.globalAlpha = 0.56;
-        if (knd === 'solid') {
-          const stub = getEditorGhostStub(box.tpl, box.w, box.h);
+        if (knd === 'tile') {
+          g.fillStyle = box.tpl.tileType === 'erase_tile' ? 'rgba(201, 36, 28, 0.25)' : 'rgba(242, 218, 145, 0.22)';
+          g.fillRect(box.x, box.y, box.w, box.h);
+        } else if (knd === 'solid') {
+          const stub = getEditorGhostStub(box.tpl, box.w, box.h, box.rot);
           if (stub.type === 'water_barrel') {
             const bc = getBarrelCaches(box.w, box.h);
             g.fillStyle = P.water[2];
@@ -5969,8 +7473,16 @@
             g.fillStyle = P.woodWarm[1];
             g.fillRect(box.x, box.y, box.w, box.h);
           }
+        } else if (knd === 'door_pair') {
+          g.fillStyle = P.woodWarm[1];
+          g.fillRect(box.x, box.y, box.w, box.h);
+          g.fillStyle = P.brass[0];
+          g.fillRect(box.cx - 2, box.cy - 2, 4, 4);
+        } else if (knd === 'interactable') {
+          g.fillStyle = P.brass[1];
+          g.fillRect(box.x, box.y, box.w, box.h);
         } else if (knd === 'tree') {
-          const stub = getEditorGhostStub(box.tpl, box.w, box.h);
+          const stub = getEditorGhostStub(box.tpl, box.w, box.h, box.rot);
           if (stub.baked && stub.baked.canvas) {
             g.drawImage(stub.baked.canvas, Math.round(box.cx + stub.baked.ox), Math.round(box.cy + stub.baked.oy));
           }
@@ -5980,19 +7492,39 @@
         } else if (knd === 'bottle') {
           g.fillStyle = P.foliage[1];
           g.fillRect(box.cx - 2, box.cy - 3, 4, 6);
+        } else if (knd === 'oil_lamp') {
+          g.fillStyle = P.brass[0];
+          g.fillRect(box.cx - 3, box.cy - 3, 6, 6);
         } else if (knd === 'bandit') {
           g.fillStyle = box.tpl.tough ? P.steelDark[3] : P.barnRed[1];
           fillRoundPix(g, box.cx - 6, box.cy - 8, 12, 16);
           g.fillStyle = P.brass[0];
           g.fillRect(box.cx - 2, box.cy - 2, 4, 4);
+        } else if (knd === 'civilian') {
+          g.fillStyle = box.tpl.subType === 'lady' ? P.barnRed[1] : (box.tpl.subType === 'quest' ? P.cloth[1] : P.woodWarm[1]);
+          fillRoundPix(g, box.cx - 6, box.cy - 8, 12, 16);
         } else if (knd === 'horse') {
           g.fillStyle = P.leather[2];
           fillRoundPix(g, box.cx - 12, box.cy - 6, 24, 12);
         } else if (knd === 'sheep') {
           g.fillStyle = P.cloud[0];
           fillRoundPix(g, box.cx - 6, box.cy - 5, 12, 10);
+        } else if (knd === 'crow') {
+          g.fillStyle = P.cloth[4];
+          g.fillRect(box.cx - 3, box.cy - 3, 6, 6);
+        } else if (knd === 'snake') {
+          g.fillStyle = P.grass[2];
+          g.fillRect(box.cx - 5, box.cy - 2, 10, 4);
+        } else if (knd === 'spawn') {
+          g.fillStyle = P.foliage[0];
+          g.fillRect(box.cx - 8, box.cy - 1, 16, 2);
+          g.fillRect(box.cx - 1, box.cy - 8, 2, 16);
+        } else if (knd === 'zone') {
+          g.fillStyle = box.tpl.zoneKind === 'exit' ? 'rgba(214, 174, 82, 0.25)' : 'rgba(123, 164, 173, 0.25)';
+          g.fillRect(box.x, box.y, box.w, box.h);
         }
-        g.globalAlpha = 0.92;
+        // Чёткая 4 px (или 1 px при Alt) рамка привязки вокруг превью
+        g.globalAlpha = 0.94;
         g.fillStyle = P.brass[0];
         g.fillRect(box.x - 1, box.y - 1, box.w + 2, 1);
         g.fillRect(box.x - 1, box.y + box.h, box.w + 2, 1);
@@ -6001,24 +7533,56 @@
       }
     }
 
-    // Красная пиксельная рамка подсветки редактируемого объекта под курсором (locked-здания и салун не подсвечиваются)
+    // Выделенный в режиме Двигать [M] объект
+    if (ed.selectedEntity) {
+      const sel = ed.selectedEntity;
+      const sx = Math.round(sel.x);
+      const sy = Math.round(sel.y);
+      const sw = Math.round(sel.w);
+      const sh = Math.round(sel.h);
+      g.globalAlpha = 0.95;
+      g.fillStyle = P.brass[0];
+      g.fillRect(sx - 2, sy - 2, sw + 4, 1);
+      g.fillRect(sx - 2, sy + sh + 1, sw + 4, 1);
+      g.fillRect(sx - 2, sy - 1, 1, sh + 2);
+      g.fillRect(sx + sw + 1, sy - 1, 1, sh + 2);
+    }
+
+    // Подсветка объекта под курсором + компактная подпись тега / requiresUnlock
     if (hoverHit) {
       const rx = Math.round(hoverHit.x);
       const ry = Math.round(hoverHit.y);
       const rw = Math.round(hoverHit.w);
       const rh = Math.round(hoverHit.h);
-      g.globalAlpha = ed.tool === 'erase' ? 0.95 : 0.45;
-      g.fillStyle = P.blood[0];
+      g.globalAlpha = ed.tool === 'erase' ? 0.95 : 0.55;
+      g.fillStyle = ed.tool === 'move' ? P.glass[0] : P.blood[0];
       g.fillRect(rx - 2, ry - 2, rw + 4, 2);
       g.fillRect(rx - 2, ry + rh, rw + 4, 2);
       g.fillRect(rx - 2, ry, 2, rh);
       g.fillRect(rx + rw, ry, 2, rh);
+
+      const hTag = getEntityTagValue(hoverHit);
+      const hLock = getEntityUnlockValue(hoverHit);
+      if (hTag || hLock) {
+        const badgeTxt = `${hTag ? '[' + hTag + '] ' : ''}${hLock ? '🔒' + hLock : ''}`.trim();
+        g.globalAlpha = 0.92;
+        g.font = 'bold 8px "Courier New", monospace';
+        g.textAlign = 'left';
+        const tw = Math.ceil(g.measureText(badgeTxt).width) + 6;
+        const bx = rx;
+        const by = Math.max(4, ry - 14);
+        g.fillStyle = '#18130f';
+        g.fillRect(bx, by, tw, 11);
+        g.fillStyle = P.brass[0];
+        g.fillText(badgeTxt, bx + 3, by + 8);
+      }
     }
 
     g.restore();
   }
 
   function drawCrosshairs() {
+    if (state.screen === 'menu' || state.screen === 'paused') return;
     const mx = Math.round(state.input.mouseX);
     const my = Math.round(state.input.mouseY);
 
@@ -6284,9 +7848,14 @@
     if (activeTab !== lastEditorTab) {
       buildEditorPaletteDOM();
     }
-    const key = `${ed.active}|${ed.tool}|${activeTab}|${ed.selectedType}|${ed.rotated}|${isClient}`;
+    const selObj = ed.selectedEntity && ed.selectedEntity.obj;
+    const key = `${ed.active}|${ed.tool}|${activeTab}|${ed.selectedType}|${ed.rotated}|${ed.brushSize || 1}|${!!selObj}|${isClient}|${state.currentMapName || ''}`;
     if (key === lastEditorKey) return;
     lastEditorKey = key;
+
+    if (ui.editorMapName) {
+      ui.editorMapName.textContent = state.currentMapName || 'Стандартная';
+    }
 
     if (ui.btnEditor) {
       ui.btnEditor.disabled = isClient;
@@ -6295,12 +7864,22 @@
     }
     if (ui.editorPanel) ui.editorPanel.classList.toggle('hidden', !ed.active || isClient);
     if (ui.btnEditorPlace) ui.btnEditorPlace.classList.toggle('active', ed.tool === 'place');
+    if (ui.btnEditorMove) ui.btnEditorMove.classList.toggle('active', ed.tool === 'move');
     if (ui.btnEditorErase) {
       ui.btnEditorErase.classList.toggle('active', ed.tool === 'erase');
       ui.btnEditorErase.classList.toggle('btn-warn', ed.tool === 'erase');
     }
+    if (ui.btnEditorTabTerrain) ui.btnEditorTabTerrain.classList.toggle('active', activeTab === 'terrain');
+    if (ui.btnEditorTabBuildings) ui.btnEditorTabBuildings.classList.toggle('active', activeTab === 'buildings');
     if (ui.btnEditorTabObjects) ui.btnEditorTabObjects.classList.toggle('active', activeTab === 'objects');
     if (ui.btnEditorTabNpc) ui.btnEditorTabNpc.classList.toggle('active', activeTab === 'npc');
+    if (ui.editorTerrainControls) ui.editorTerrainControls.classList.toggle('hidden', activeTab !== 'terrain');
+    if (ui.btnEditorBrushSize) {
+      const bs = (ed.brushSize || 1) === 2 ? 2 : 1;
+      ui.btnEditorBrushSize.textContent = bs === 2 ? '2×2 (64×64)' : '1×1 (32×32)';
+      ui.btnEditorBrushSize.classList.toggle('active', bs === 2);
+    }
+    if (ui.editorInspector) ui.editorInspector.classList.toggle('hidden', activeTab === 'terrain');
     if (ui.btnEditorRotate) {
       ui.btnEditorRotate.textContent = ed.rotated ? 'Повернуть [Q]: ВЕРТ' : 'Повернуть [Q]';
     }
@@ -6325,6 +7904,9 @@
 
     const online = info.role !== 'offline';
     const isClient = info.role === 'client';
+    if (online && state.screen === 'menu' && G.UI && G.UI.setScreen) {
+      G.UI.setScreen('playing');
+    }
     if (ui.btnNetwork) {
       ui.btnNetwork.classList.toggle('active', online);
       ui.btnNetwork.textContent = online ? (isClient ? '🌐 КЛИЕНТ' : `🌐 ХОСТ (${info.roster.length})`) : '🌐 СЕТЬ';
@@ -6654,16 +8236,22 @@
     drawDecals(pctx, org);
     drawBloodTrail(pctx, org);
     drawPuddles(pctx, org);
+    drawOilPuddles(pctx, org);
     drawDeadBandits(pctx, org);
     drawShells(pctx, org);
     drawFlyingHats(pctx, org);
+    drawLizards(pctx, org);
+    drawSnakes(pctx, org);
 
     for (let i = 0; i < world.solids.length; i++) {
       const s = world.solids[i];
+      if (s._storyHidden) continue;
       if (!s.high && isInView(s.x, s.y, s.w, s.h, org, 48)) drawSolid(pctx, s);
     }
-    drawSaloonInteractables(pctx);
+    drawSaloonInteractables(pctx, org);
+    drawOilLamps(pctx, org);
 
+    drawCivilians(pctx, org);
     drawTargets(pctx, org);
     drawDoors(pctx);
     drawSheep(pctx, org);
@@ -6682,16 +8270,46 @@
         drawPlayer(pctx, _playersDrawBuf[i]);
       }
     }
+    // Y-сортировка горизонтальных заборов поверх ног персонажей, стоящих севернее забора
+    for (let i = 0; i < world.solids.length; i++) {
+      const s = world.solids[i];
+      if (s.type !== 'fence' || s.high || s.w < s.h) continue;
+      if (!isInView(s.x, s.y, s.w, s.h, org, 24)) continue;
+      let hasNorthChar = false;
+      for (let pi = 0; pi < srcPlayers.length; pi++) {
+        const pl = srcPlayers[pi];
+        if (pl && !pl.dead && pl.y < s.y + s.h * 0.5 && pl.y > s.y - 34 && pl.x > s.x - 22 && pl.x < s.x + s.w + 22) {
+          hasNorthChar = true;
+          break;
+        }
+      }
+      if (!hasNorthChar && world.horse && world.horse.state !== 'dead') {
+        const hr = world.horse;
+        if (hr.y < s.y + s.h * 0.5 && hr.y > s.y - 36 && hr.x > s.x - 26 && hr.x < s.x + s.w + 26) hasNorthChar = true;
+      }
+      if (!hasNorthChar && world.targets) {
+        for (let ti = 0; ti < world.targets.length; ti++) {
+          const t = world.targets[ti];
+          if (t && t.kind === 'bandit' && t.alive && t.y < s.y + s.h * 0.5 && t.y > s.y - 34 && t.x > s.x - 22 && t.x < s.x + s.w + 22) {
+            hasNorthChar = true;
+            break;
+          }
+        }
+      }
+      if (hasNorthChar) drawSolid(pctx, s);
+    }
     drawBullets(pctx);
     drawBloodDrops(pctx, org);
 
     for (let i = 0; i < world.solids.length; i++) {
       const s = world.solids[i];
+      if (s._storyHidden) continue;
       if (s.high && isInView(s.x, s.y, s.w, s.h, org, 48)) drawSolid(pctx, s);
     }
     drawPolesAndWires(pctx, org);
     drawTrees(pctx, org);
     drawBirdFlocks(pctx, org);
+    drawCrows(pctx, org);
 
     drawParticles(pctx, org);
     drawGunSmokeClouds(pctx, org);
@@ -6768,6 +8386,8 @@
   function init() {
     resize();
     initReloadCaches();
+    getDartboardCanvas(getPal());
+    getHatrackCanvas(getPal());
     state = G.createInitialState();
     world = G.WORLD.create();
     state.input.mouseX = viewW * 0.6;
@@ -6776,6 +8396,9 @@
     bindEvents();
     refreshKeybindLabels();
     syncSettingsUI();
+    if (G.UI && G.UI.setScreen) {
+      G.UI.setScreen('menu');
+    }
     updateHUD();
     updateNetUI();
     requestAnimationFrame(loop);
